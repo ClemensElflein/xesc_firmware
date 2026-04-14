@@ -149,7 +149,6 @@ CSRC = $(STARTUPSRC) \
        $(TMCSRC) \
        qmlui/qmlui.c \
        $(ENCSRC) \
-       $(TMCSRC)
        conf_custom.c
 
 ifeq ($(USE_LISPBM),1)
