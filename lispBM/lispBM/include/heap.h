@@ -28,6 +28,7 @@
 #include "lbm_memory.h"
 #include "lbm_defines.h"
 #include "lbm_channel.h"
+#include "lbm_image.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -230,7 +231,7 @@ typedef struct {
 
 extern lbm_heap_state_t lbm_heap_state;
 
-typedef bool (*const_heap_write_fun)(lbm_uint ix, lbm_uint w);
+typedef bool (*const_heap_write_fun)(lbm_uint w, lbm_uint ix);
 
 typedef struct {
   lbm_uint *heap;
@@ -253,7 +254,7 @@ typedef struct {
   lbm_uint *data;
   uint32_t index;         // Limits arrays to max 2^32-1 elements.
 } lbm_array_header_extended_t;
-  
+
 /** Lock GC mutex
  *  Locks a mutex during GC marking when using the pointer reversal algorithm.
  *  Does nothing when using stack based GC mark.
@@ -267,10 +268,10 @@ void lbm_gc_unlock(void);
  * \param addr Pointer to an array of lbm_cons_t elements. This array must at least be aligned 4.
  * \param num_cells Number of lbm_cons_t elements in the array.
  * \param gc_stack_size Size of the gc_stack in number of words.
- * \return 1 on success or 0 for failure.
+ * \return true on success or false for failure.
  */
-int lbm_heap_init(lbm_cons_t *addr, lbm_uint num_cells,
-                  lbm_uint gc_stack_size);
+bool lbm_heap_init(lbm_cons_t *addr, lbm_uint num_cells,
+                   lbm_uint gc_stack_size);
 
 /** Add GC time statistics to heap_stats
  *
@@ -286,7 +287,10 @@ void lbm_heap_new_freelist_length(void);
  *
  * \return Number of free lbm_cons_t cells.
  */
-lbm_uint lbm_heap_num_free(void);
+static inline lbm_uint lbm_heap_num_free(void) {
+  return lbm_heap_state.heap_size - lbm_heap_state.num_alloc;
+}
+
 /** Check how many lbm_cons_t cells are allocated.
  *
  * \return  Number of lbm_cons_t cells that are currently allocated.
@@ -307,9 +311,9 @@ lbm_uint lbm_heap_size_bytes(void);
  * \param type A type that can be encoded onto the cell (most often LBM_PTR_TYPE_CONS).
  * \param car Value to write into car position of allocated cell.
  * \param cdr Value to write into cdr position of allocated cell.
- * \return An lbm_value referring to a cons_cell or enc_sym(SYM_MERROR) in case the heap is full.
+ * \return a heap cell on success and Memory_error on failure.
  */
-lbm_value lbm_heap_allocate_cell(lbm_type type, lbm_value car, lbm_value cdr);
+lbm_value lbm_heap_allocate_cell(lbm_type ptr_type, lbm_value car, lbm_value cdr);
 /** Allocate a list of n heap-cells.
  * \param n The number of heap-cells to allocate.
  * \return A list of heap-cells of Memory error if unable to allocate.
@@ -334,6 +338,16 @@ lbm_value lbm_heap_allocate_list_init(unsigned int n, ...);
  * \return allocated list or error symbol
  */
 char *lbm_dec_str(lbm_value val);
+/** Decode a readable array, if the argument is not an array the result is NULL
+  * \param val value to decode.
+  * \return array pointer or NULL.
+  */
+lbm_array_header_t *lbm_dec_array_r(lbm_value val);
+/** Decode an a read/write array, if the argument is not an array the result is NULL
+ * \param val value to decode.
+ * \return array pointer or NULL.
+ */
+lbm_array_header_t *lbm_dec_array_rw(lbm_value val);
 /** Decode an lbm_value representing a char channel into an lbm_char_channel_t pointer.
  *
  * \param val Value
@@ -410,6 +424,7 @@ lbm_uint lbm_dec_raw(lbm_value v);
  * \param cdr The value to put in the cdr field of the allocated lbm_cons_t.
  * \return A value referencing the lbm_cons_t or enc_sym(SYM_MERROR) if heap is full.
  */
+
 lbm_value lbm_cons(lbm_value car, lbm_value cdr);
 
 /** Accesses the car field of an lbm_cons_t.
@@ -479,24 +494,6 @@ int lbm_set_car_and_cdr(lbm_value c, lbm_value car_val, lbm_value cdr_val);
  * \return The length of the list. Unless the value is a cyclic structure on the heap, this function will terminate.
  */
 lbm_uint lbm_list_length(lbm_value c);
-
-/** Calculate the length of a proper list and evaluate a predicate for each element.
- * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
- * may lead to the function not terminating.
- *
- * \param c A list
- * \param pres Boolean result of predicate, false if predicate is false for any of the elements in the list, otherwise true.
- * \param pred Predicate to evaluate for each element of the list.
- */
-unsigned int lbm_list_length_pred(lbm_value c, bool *pres, bool (*pred)(lbm_value));
-/** Reverse a proper list
- * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
- * may lead to the function not terminating.
- *
- * \param list A list
- * \return The list reversed or enc_sym(SYM_MERROR) if heap is full.
- */
-lbm_value lbm_list_reverse(lbm_value list);
 /** Reverse a proper list destroying the original.
  * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
  * may lead to the function not terminating.
@@ -621,26 +618,16 @@ lbm_int lbm_heap_array_get_size(lbm_value arr);
  * \return NULL or valid pointer.
  */
 const uint8_t *lbm_heap_array_get_data_ro(lbm_value arr);
-/** Get a pointer to the data of an array for read/write purposes.
- * \param arr lbm_value array to get pointer from.
- * \return NULL or valid pointer.
- */
-uint8_t *lbm_heap_array_get_data_rw(lbm_value arr);
+
 /** Explicitly free an array.
  *  This function needs to be used with care and knowledge.
  * \param arr Array value.
  */
 int lbm_heap_explicit_free_array(lbm_value arr);
-/** Query the size in bytes of an lbm_type.
- * \param t Type
- * \return Size in bytes of type or 0 if the type represents a composite.
- */
-lbm_uint lbm_size_of(lbm_type t);
 
 int lbm_const_heap_init(const_heap_write_fun w_fun,
                         lbm_const_heap_t *heap,
-                        lbm_uint *addr,
-                        lbm_uint num_words);
+                        lbm_uint *addr);
 
 lbm_flash_status lbm_allocate_const_cell(lbm_value *res);
 lbm_flash_status lbm_write_const_raw(lbm_uint *data, lbm_uint n, lbm_uint *res);
@@ -808,13 +795,19 @@ static inline bool lbm_is_ptr(lbm_value x) {
   return (x & LBM_PTR_BIT);
 }
 
+static inline bool lbm_is_constant(lbm_value x) {
+  return ((x & LBM_PTR_BIT && x & LBM_PTR_TO_CONSTANT_BIT) ||
+          (!(x & LBM_PTR_BIT)));
+}
+
 /**
  * Check if a value is a Read/Writeable cons cell
  * \param x Value to check
  * \return true if x is a Read/Writeable cons cell, false otherwise.
  */
 static inline bool lbm_is_cons_rw(lbm_value x) {
-  return (lbm_type_of(x) == LBM_TYPE_CONS);
+  return !((x & (LBM_CONS_CONST_TYPE_MASK | LBM_PTR_BIT)) ^ LBM_EXACT_CONS_MASK);
+  //return (lbm_type_of(x) == LBM_TYPE_CONS);
 }
 
 /**
@@ -823,9 +816,14 @@ static inline bool lbm_is_cons_rw(lbm_value x) {
  * \return true if x is a readable cons cell, false otherwise.
  */
 static inline bool lbm_is_cons(lbm_value x) {
-  return lbm_is_ptr(x) && ((x & LBM_CONS_TYPE_MASK) == LBM_TYPE_CONS);
+  return !((x & (LBM_CONS_TYPE_MASK | LBM_PTR_BIT)) ^ LBM_EXACT_CONS_MASK);
+  //return lbm_is_ptr(x) && ((x & LBM_CONS_TYPE_MASK) == LBM_TYPE_CONS);
 }
 
+static inline bool lbm_is_symbol_nil(lbm_value exp) {
+  return !exp;
+}
+  
 /** Check if a value represents a number
  * \param x Value to check.
  * \return true is x represents a number and false otherwise.
@@ -837,17 +835,26 @@ static inline bool lbm_is_number(lbm_value x) {
     (x & LBM_VAL_TYPE_MASK);
 }
 
+// Check if an array is valid (an invalid array has been freed by someone explicitly)
+static inline bool lbm_heap_array_valid(lbm_value arr) {
+  return !(lbm_is_symbol_nil(lbm_car(arr))); // this is an is_zero check similar to (a == NULL)
+}
+
 /** Check if value is an array that can be READ
  * \param x Value to check.
  * \return true if x represents a readable array and false otherwise.
  */
 static inline bool lbm_is_array_r(lbm_value x) {
   lbm_type t = lbm_type_of(x);
-  return ((t & LBM_PTR_TO_CONSTANT_MASK) == LBM_TYPE_ARRAY);
+  bool t_ok = ((t & LBM_PTR_TO_CONSTANT_MASK) == LBM_TYPE_ARRAY);
+  bool t_valid = lbm_heap_array_valid(x);
+  return ( t_ok && t_valid ) ;
 }
 
 static inline bool lbm_is_array_rw(lbm_value x) {
-  return( (lbm_type_of(x) == LBM_TYPE_ARRAY) && !(x & LBM_PTR_TO_CONSTANT_BIT));
+  return ((lbm_type_of(x) == LBM_TYPE_ARRAY) &&
+          !(x & LBM_PTR_TO_CONSTANT_BIT) &&
+          lbm_heap_array_valid(x));
 }
 
 static inline bool lbm_is_lisp_array_r(lbm_value x) {
@@ -909,10 +916,6 @@ static inline bool lbm_is_symbol(lbm_value exp) {
   return !(exp & LBM_LOW_RESERVED_BITS);
 }
 
-static inline bool lbm_is_symbol_nil(lbm_value exp) {
-  return !exp;
-}
-
 static inline bool lbm_is_symbol_true(lbm_value exp) {
   return (lbm_is_symbol(exp) && exp == ENC_SYM_TRUE);
 }
@@ -960,12 +963,32 @@ static inline lbm_cons_t* lbm_ref_cell(lbm_value addr) {
   //return &lbm_heap_state.heap[lbm_dec_ptr(addr)];
 }
 
+#define TRAV_FUN_SUBTREE_DONE 0
+#define TRAV_FUN_SUBTREE_CONTINUE 1
+#define TRAV_FUN_SUBTREE_PROCEED 2
+  
+typedef int (*trav_fun)(lbm_value, bool, void*);
+
+/**
+ * \param f pointer to function to execute at each node in tree.
+ * \param v Tree to traverses.
+ * \param arg Extra argument to pass to f when applied.
+ */
+void lbm_ptr_rev_trav(trav_fun f, lbm_value v, void* arg);
 
 // lbm_uint a = lbm_heaps[0];
 // lbm_uint b = lbm_heaps[1];
 // lbm_uint i = (addr & LBM_PTR_TO_CONSTANT_BIT) >> LBM_PTR_TO_CONSTANT_SHIFT) - 1;
 // lbm_uint h = (a & i) | (b & ~i);
 
+#ifdef LBM64
+#define lbm_dec_as_int lbm_dec_as_i64
+#define lbm_dec_as_uint lbm_dec_as_u64
+#else 
+#define lbm_dec_as_int lbm_dec_as_i32
+#define lbm_dec_as_uint lbm_dec_as_u32
+#endif
+  
 #ifdef __cplusplus
 }
 #endif

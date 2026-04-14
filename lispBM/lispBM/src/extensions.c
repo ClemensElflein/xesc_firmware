@@ -27,10 +27,13 @@
 #include "lbm_utils.h"
 
 static lbm_uint ext_max    = 0;
-static lbm_uint ext_num    = 0;
 static lbm_uint next_extension_ix = 0;
 
 lbm_extension_t *extension_table = NULL;
+
+void lbm_extensions_set_next(lbm_uint i) {
+  next_extension_ix = i;
+}
 
 lbm_value lbm_extensions_default(lbm_value *args, lbm_uint argn) {
   (void)args;
@@ -38,8 +41,8 @@ lbm_value lbm_extensions_default(lbm_value *args, lbm_uint argn) {
   return ENC_SYM_EERROR;
 }
 
-int lbm_extensions_init(lbm_extension_t *extension_storage, lbm_uint extension_storage_size) {
-  if (extension_storage == NULL || extension_storage_size == 0) return 0;
+bool lbm_extensions_init(lbm_extension_t *extension_storage, lbm_uint extension_storage_size) {
+  if (extension_storage == NULL || extension_storage_size == 0) return false;
 
   extension_table = extension_storage;
   memset(extension_table, 0, sizeof(lbm_extension_t) * extension_storage_size);
@@ -48,11 +51,10 @@ int lbm_extensions_init(lbm_extension_t *extension_storage, lbm_uint extension_s
     extension_storage[i].fptr = lbm_extensions_default;
   }
 
-  ext_num = 0;
   next_extension_ix = 0;
   ext_max = (lbm_uint)extension_storage_size;
 
-  return 1;
+  return true;
 }
 
 lbm_uint lbm_get_max_extensions(void) {
@@ -60,15 +62,16 @@ lbm_uint lbm_get_max_extensions(void) {
 }
 
 lbm_uint lbm_get_num_extensions(void) {
-  return ext_num;
+  return next_extension_ix;
 }
 
 extension_fptr lbm_get_extension(lbm_uint sym) {
-  lbm_uint ext_next = sym - EXTENSION_SYMBOLS_START;
-  if (ext_next >= ext_max) {
-    return NULL;
+  lbm_uint ext_id = sym - EXTENSION_SYMBOLS_START;
+  extension_fptr res = lbm_extensions_default;
+  if (ext_id < ext_max) {
+    res = extension_table[ext_id].fptr; 
   }
-  return extension_table[ext_next].fptr;
+  return res;
 }
 
 bool lbm_clr_extension(lbm_uint sym_id) {
@@ -96,15 +99,17 @@ bool lbm_lookup_extension_id(char *sym_str, lbm_uint *ix) {
 bool lbm_add_extension(char *sym_str, extension_fptr ext) {
   lbm_value symbol;
 
+  // symbol_by_name loops through all symbols. It may be enough
+  // to search only the extension table, but unsure what the effect will
+  // be if adding an extension with same str-name as a built-in or special
+  // form. The extension may override built-in...
+  //
   // Check if symbol already exists.
   if (lbm_get_symbol_by_name(sym_str, &symbol)) {
     if (lbm_is_extension(lbm_enc_sym(symbol))) {
       // update the extension entry.
-      if (str_eq(extension_table[SYMBOL_IX(symbol)].name, sym_str)) {
-        // Do not replace name ptr.
-        extension_table[SYMBOL_IX(symbol)].fptr = ext;
-        return true;
-      }
+      extension_table[SYMBOL_IX(symbol)].fptr = ext;
+      return true;
     }
     return false;
   }
@@ -113,7 +118,6 @@ bool lbm_add_extension(char *sym_str, extension_fptr ext) {
     lbm_uint sym_ix = next_extension_ix ++;
     extension_table[sym_ix].name = sym_str;
     extension_table[sym_ix].fptr = ext;
-    ext_num ++;
     return true;
   }
   return false;
@@ -128,12 +132,6 @@ static bool lbm_is_number_all(lbm_value *args, lbm_uint argn) {
     }
   }
   return true;
-}
-
-bool lbm_check_true_false(lbm_value v) {
-  bool res = lbm_is_symbol_true(v) || lbm_is_symbol_nil(v);
-  lbm_set_error_reason((char*)lbm_error_str_not_a_boolean);
-  return res;
 }
 
 bool lbm_check_number_all(lbm_value *args, lbm_uint argn) {
@@ -163,4 +161,33 @@ bool lbm_check_argn_number(lbm_value *args, lbm_uint argn, lbm_uint n) {
   } else {
     return true;
   }
+}
+
+lbm_value make_list(int num, ...) {
+  va_list arguments;
+  va_start (arguments, num);
+  lbm_value res = ENC_SYM_NIL;
+  for (int i = 0; i < num; i++) {
+    res = lbm_cons(va_arg(arguments, lbm_value), res);
+  }
+  va_end (arguments);
+  return lbm_list_destructive_reverse(res);
+}
+
+bool strmatch(const char *str1, const char *str2) {
+  size_t len = strlen(str1);
+
+  if (str2[len] != ' ') {
+    return false;
+  }
+
+  bool same = true;
+  for (unsigned int i = 0;i < len;i++) {
+    if (str1[i] != str2[i]) {
+      same = false;
+      break;
+    }
+  }
+
+  return same;
 }

@@ -26,12 +26,14 @@
 #include "lispif.h"
 #endif
 
-#ifdef HW_SHUTDOWN_HOLD_ON
+#ifdef HW_SHUTDOWN_CUSTOM
+// Do nothing. All shutdown functionality is handled in the hardware file.
+#elif defined(HW_SHUTDOWN_HOLD_ON)
 
 // Private variables
 bool volatile m_button_pressed = false;
 static volatile float m_inactivity_time = 0.0;
-static THD_WORKING_AREA(shutdown_thread_wa, 128);
+static THD_WORKING_AREA(shutdown_thread_wa, 256);
 static mutex_t m_sample_mutex;
 static volatile bool m_init_done = false;
 static volatile bool m_sampling_disabled = false;
@@ -77,12 +79,12 @@ bool do_shutdown(bool resample) {
 	lispif_process_shutdown();
 #endif
 
+	conf_general_store_backup_data();
+	chThdSleepMilliseconds(100);
+
 	while (m_shutdown_hold) {
 		chThdSleepMilliseconds(5);
 	}
-
-	conf_general_store_backup_data();
-	chThdSleepMilliseconds(100);
 
 	bool disable_gates = true;
 	if (resample) {
@@ -134,14 +136,34 @@ static THD_FUNCTION(shutdown_thread, arg) {
 
 		switch (conf->shutdown_mode) {
 		case SHUTDOWN_MODE_ALWAYS_OFF:
+#ifdef HW_SHUTDOWN_NO
+			if (m_button_pressed) {
+				HW_SHUTDOWN_HOLD_ON();
+			} else {
+				do_shutdown(false);
+			}
+#else
 			if (m_button_pressed) {
 				gates_disabled_here = do_shutdown(true);
 			}
+#endif
 			break;
 
 		case SHUTDOWN_MODE_ALWAYS_ON:
-			m_inactivity_time += dt;
 			HW_SHUTDOWN_HOLD_ON();
+			break;
+
+		default:
+			if (clicked) {
+				gates_disabled_here = do_shutdown(false);
+			}
+			break;
+		}
+
+		switch (conf->shutdown_mode) {
+		case SHUTDOWN_MODE_ALWAYS_OFF:
+		case SHUTDOWN_MODE_ALWAYS_ON: {
+			m_inactivity_time += dt;
 			// Without a shutdown switch use inactivity timer to estimate
 			// when device is stopped. Check also distance between store
 			// to prevent excessive flash write cycles.
@@ -153,12 +175,8 @@ static THD_FUNCTION(shutdown_thread, arg) {
 					odometer_old = mc_interface_get_odometer();
 				}
 			}
-			break;
-
+		}
 		default:
-			if (clicked) {
-				gates_disabled_here = do_shutdown(false);
-			}
 			break;
 		}
 

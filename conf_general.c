@@ -17,7 +17,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
-#pragma GCC push_options
 #pragma GCC optimize ("Os")
 
 #include "conf_general.h"
@@ -64,7 +63,7 @@ __attribute__((section(".ram4"))) volatile backup_data g_backup;
 static bool read_eeprom_var(eeprom_var *v, int address, uint16_t base);
 static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base);
 
-void conf_general_init(void) {
+__attribute__((section(".text2"))) void conf_general_init(void) {
 	// First, make sure that all relevant virtual addresses are assigned for page swapping.
 	memset(VirtAddVarTab, 0, sizeof(VirtAddVarTab));
 
@@ -128,11 +127,26 @@ void conf_general_init(void) {
 		if (g_backup.hw_config_init_flag == BACKUP_VAR_INIT_CODE) {
 			memcpy((void*)backup_tmp.hw_config, (uint8_t*)g_backup.hw_config, sizeof(g_backup.hw_config));
 		}
+
+		if (g_backup.enc_corr_init_flag == BACKUP_VAR_INIT_CODE) {
+			memcpy((void*)backup_tmp.enc_corr, (uint8_t*)g_backup.enc_corr, sizeof(g_backup.enc_corr));
+			backup_tmp.enc_corr_en = g_backup.enc_corr_en;
+		}
+
+		if (g_backup.can_init_flag == BACKUP_VAR_INIT_CODE) {
+			backup_tmp.can_baud = g_backup.can_baud;
+			backup_tmp.can_id = g_backup.can_id;
+		} else {
+			backup_tmp.can_baud = APPCONF_CAN_BAUD_RATE;
+			backup_tmp.can_id = HW_DEFAULT_ID;
+		}
 	}
 
 	backup_tmp.odometer_init_flag = BACKUP_VAR_INIT_CODE;
 	backup_tmp.runtime_init_flag = BACKUP_VAR_INIT_CODE;
 	backup_tmp.hw_config_init_flag = BACKUP_VAR_INIT_CODE;
+	backup_tmp.enc_corr_init_flag = BACKUP_VAR_INIT_CODE;
+	backup_tmp.can_init_flag = BACKUP_VAR_INIT_CODE;
 
 	g_backup = backup_tmp;
 	conf_general_store_backup_data();
@@ -145,7 +159,15 @@ void conf_general_init(void) {
  * a page swap might longer than the capacitors have voltage left, which could make cause the motor and
  * app config to get lost.
  */
-bool conf_general_store_backup_data(void) {
+__attribute__((section(".text2"))) bool conf_general_store_backup_data(void) {
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
+
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
+		return false;
+	}
+
+	utils_sys_lock_cnt();
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
@@ -165,9 +187,11 @@ bool conf_general_store_backup_data(void) {
 			break;
 		}
 	}
-	FLASH_Lock();
 
+	FLASH_Lock();
 	timeout_configure_IWDT();
+	mc_interface_ignore_input_both(100);
+	utils_sys_unlock_cnt();
 
 	return is_ok;
 }
@@ -184,8 +208,8 @@ bool conf_general_store_backup_data(void) {
  * @return
  * true for success, false if variable was not found.
  */
-bool conf_general_read_eeprom_var_hw(eeprom_var *v, int address) {
-	if (address < 0 || address > (EEPROM_VARS_HW - 1)) {
+__attribute__((section(".text2"))) bool conf_general_read_eeprom_var_hw(eeprom_var *v, int address) {
+	if (address < 0 || address >= EEPROM_VARS_HW) {
 		return false;
 	}
 	return read_eeprom_var(v, address, EEPROM_BASE_HW);
@@ -203,8 +227,8 @@ bool conf_general_read_eeprom_var_hw(eeprom_var *v, int address) {
  * @return
  * true for success, false if variable was not found.
  */
-bool conf_general_read_eeprom_var_custom(eeprom_var *v, int address) {
-	if (address < 0 || address > (EEPROM_VARS_CUSTOM - 1)) {
+__attribute__((section(".text2"))) bool conf_general_read_eeprom_var_custom(eeprom_var *v, int address) {
+	if (address < 0 || address >= EEPROM_VARS_CUSTOM) {
 		return false;
 	}
 	return read_eeprom_var(v, address, EEPROM_BASE_CUSTOM);
@@ -222,8 +246,8 @@ bool conf_general_read_eeprom_var_custom(eeprom_var *v, int address) {
  * @return
  * true for success, false if something went wrong.
  */
-bool conf_general_store_eeprom_var_hw(eeprom_var *v, int address) {
-	if (address < 0 || address > (EEPROM_VARS_HW - 1)) {
+__attribute__((section(".text2"))) bool conf_general_store_eeprom_var_hw(eeprom_var *v, int address) {
+	if (address < 0 || address >= EEPROM_VARS_HW) {
 		return false;
 	}
 	return store_eeprom_var(v, address, EEPROM_BASE_HW);
@@ -241,14 +265,14 @@ bool conf_general_store_eeprom_var_hw(eeprom_var *v, int address) {
  * @return
  * true for success, false if something went wrong.
  */
-bool conf_general_store_eeprom_var_custom(eeprom_var *v, int address) {
-	if (address < 0 || address > (EEPROM_VARS_CUSTOM - 1)) {
+__attribute__((section(".text2"))) bool conf_general_store_eeprom_var_custom(eeprom_var *v, int address) {
+	if (address < 0 || address >= EEPROM_VARS_CUSTOM) {
 		return false;
 	}
 	return store_eeprom_var(v, address, EEPROM_BASE_CUSTOM);
 }
 
-static bool read_eeprom_var(eeprom_var *v, int address, uint16_t base) {
+__attribute__((section(".text2"))) static bool read_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	bool is_ok = true;
 	uint16_t var0, var1;
 
@@ -263,13 +287,21 @@ static bool read_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	return is_ok;
 }
 
-static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
+__attribute__((section(".text2"))) static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	bool is_ok = true;
 	uint16_t var0, var1;
 
 	var0 = v->as_u32 >> 16;
 	var1 = v->as_u32 & 0xFFFF;
 
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
+
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
+		return 100;
+	}
+
+	utils_sys_lock_cnt();
 	timeout_configure_IWDT_slowest();
 
 	FLASH_Unlock();
@@ -287,8 +319,9 @@ static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	}
 
 	FLASH_Lock();
-
 	timeout_configure_IWDT();
+	mc_interface_ignore_input_both(100);
+	utils_sys_unlock_cnt();
 
 	return is_ok;
 }
@@ -299,7 +332,7 @@ static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
  * @param conf
  * A pointer to a app_configuration struct to write the read configuration to.
  */
-void conf_general_read_app_configuration(app_configuration *conf) {
+__attribute__((section(".text2"))) void conf_general_read_app_configuration(app_configuration *conf) {
 	bool is_ok = true;
 	uint8_t *conf_addr = (uint8_t*)conf;
 	uint16_t var;
@@ -329,6 +362,8 @@ void conf_general_read_app_configuration(app_configuration *conf) {
 	// Set the default configuration
 	if (!is_ok) {
 		confgenerator_set_defaults_appconf(conf);
+		conf->can_baud_rate = g_backup.can_baud;
+		conf->controller_id = g_backup.can_id;
 	}
 }
 
@@ -338,38 +373,27 @@ void conf_general_read_app_configuration(app_configuration *conf) {
  * @param conf
  * A pointer to the configuration that should be stored.
  */
-bool conf_general_store_app_configuration(app_configuration *conf) {
-	int motor_old = mc_interface_get_motor_thread();
+__attribute__((section(".text2"))) bool conf_general_store_app_configuration(app_configuration *conf) {
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
 
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
-		return false;
-	}
-
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
 		return false;
 	}
 
 	utils_sys_lock_cnt();
-
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
 	uint8_t *conf_addr = (uint8_t*)conf;
 	uint16_t var;
+
+	// Some hardware does not have USB and/or UART broken out. On that hardware we always boot with
+	// VESC CAN mode to make it harder to lock yourself out of the device.
+#ifdef HW_BOOT_VESC_CAN
+	CAN_MODE can_mode_before = conf->can_mode;
+	conf->can_mode = CAN_MODE_VESC;
+#endif
 
 	conf->crc = app_calc_crc(conf);
 
@@ -386,20 +410,19 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
 			break;
 		}
 	}
+
+#ifdef HW_BOOT_VESC_CAN
+	conf->can_mode = can_mode_before;
+#endif
+
 	FLASH_Lock();
-
 	timeout_configure_IWDT();
-
-	chThdSleepMilliseconds(100);
-
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-
+	mc_interface_ignore_input_both(100);
 	utils_sys_unlock_cnt();
 
-	mc_interface_select_motor_thread(motor_old);
+	g_backup.can_id = conf->controller_id;
+	g_backup.can_baud = conf->can_baud_rate;
+	conf_general_store_backup_data();
 
 	return is_ok;
 }
@@ -410,7 +433,7 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
  * @param conf
  * A pointer to a mc_configuration struct to write the read configuration to.
  */
-void conf_general_read_mc_configuration(mc_configuration *conf, bool is_motor_2) {
+__attribute__((section(".text2"))) void conf_general_read_mc_configuration(mc_configuration *conf, bool is_motor_2) {
 	bool is_ok = true;
 	uint8_t *conf_addr = (uint8_t*)conf;
 	uint16_t var;
@@ -449,33 +472,15 @@ void conf_general_read_mc_configuration(mc_configuration *conf, bool is_motor_2)
  * @param conf
  * A pointer to the configuration that should be stored.
  */
-bool conf_general_store_mc_configuration(mc_configuration *conf, bool is_motor_2) {
-	int motor_old = mc_interface_get_motor_thread();
+__attribute__((section(".text2"))) bool conf_general_store_mc_configuration(mc_configuration *conf, bool is_motor_2) {
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
 
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
-		return false;
-	}
-
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
 		return false;
 	}
 
 	utils_sys_lock_cnt();
-
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
@@ -497,25 +502,16 @@ bool conf_general_store_mc_configuration(mc_configuration *conf, bool is_motor_2
 			break;
 		}
 	}
+
 	FLASH_Lock();
-
 	timeout_configure_IWDT();
-
-	chThdSleepMilliseconds(100);
-
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-
+	mc_interface_ignore_input_both(100);
 	utils_sys_unlock_cnt();
-
-	mc_interface_select_motor_thread(motor_old);
 
 	return is_ok;
 }
 
-bool conf_general_detect_motor_param(float current, float min_rpm, float low_duty,
+__attribute__((section(".text2"))) bool conf_general_detect_motor_param(float current, float min_rpm, float low_duty,
 		float *int_limit, float *bemf_coupling_k, int8_t *hall_table, int *hall_res) {
 
 	int ok_steps = 0;
@@ -743,7 +739,7 @@ bool conf_general_detect_motor_param(float current, float min_rpm, float low_dut
  * @return
  * True for success, false otherwise.
  */
-bool conf_general_measure_flux_linkage(float current, float duty,
+__attribute__((section(".text2"))) bool conf_general_measure_flux_linkage(float current, float duty,
 		float min_erpm, float res, float *linkage) {
 
 	mc_configuration *mcconf = mempools_alloc_mcconf();
@@ -904,7 +900,7 @@ bool conf_general_measure_flux_linkage(float current, float duty,
 }
 
 /* Calculate DTG register */
-uint8_t conf_general_calculate_deadtime(float deadtime_ns, float core_clock_freq) {
+__attribute__((section(".text2"))) uint8_t conf_general_calculate_deadtime(float deadtime_ns, float core_clock_freq) {
 	uint8_t DTG = 0;
 	float timebase = 1.0 / (core_clock_freq / 1000000.0) * 1000.0;
 
@@ -968,12 +964,23 @@ uint8_t conf_general_calculate_deadtime(float deadtime_ns, float core_clock_freq
  * @return
  * Fault code
  */
-int conf_general_measure_flux_linkage_openloop(float current, float duty,
+__attribute__((section(".text2"))) int conf_general_measure_flux_linkage_openloop(float current, float duty,
 		float erpm_per_sec, float res, float ind, float *linkage,
-		float *linkage_undriven, float *undriven_samples, bool *result) {
+		float *linkage_undriven, float *undriven_samples, bool *result,
+		float *enc_offset, float *enc_ratio, bool *enc_inverted) {
 
 	*result = false;
 	int fault = FAULT_CODE_NONE;
+
+	if (enc_offset) {
+		*enc_offset = -1;
+	}
+	if (enc_ratio) {
+		*enc_ratio = -1;
+	}
+	if (enc_inverted) {
+		*enc_inverted = false;
+	}
 
 	// Allow using old values when only measuring the flux linkage undriven
 	if (fabsf(current) <= mc_interface_get_configuration()->cc_min_current) {
@@ -1191,6 +1198,15 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 		*linkage = 0.0;
 	}
 
+	float enc_diff_sin = 0.0;
+	float enc_diff_cos = 0.0;
+	float enc_val_last = encoder_read_deg();
+	float phase_val_last = mcpwm_foc_get_phase_observer();
+	float enc_ratio_sum = 0.0;
+	float enc_samples = 0.0;
+	float enc_travel = 0.0;
+	bool enc_res_set = false;
+
 	float linkage_sum = 0.0;
 	float linkage_samples = 0.0;
 	if (fault == FAULT_CODE_NONE) {
@@ -1202,6 +1218,9 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 
 			linkage_sum += mcpwm_foc_get_vq() / rad_s_now;
 
+			float phase_bemf = mcpwm_foc_get_phase_bemf();
+//			float phase_bemf = mcpwm_foc_get_phase_observer();
+
 			// Optionally use magnitude
 			//              linkage_sum += sqrtf(SQ(mcpwm_foc_get_vq()) + SQ(mcpwm_foc_get_vd())) / rad_s_now;
 
@@ -1209,6 +1228,52 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 			//              float x1, x2;
 			//              mcpwm_foc_get_observer_state(&x1, &x2);
 			//              linkage_sum += sqrtf(SQ(x1) + SQ(x2));
+
+			float diff_encoder = utils_angle_difference(encoder_read_deg(), enc_val_last);
+
+			if (fabsf(diff_encoder) >= 5.0) {
+				float diff_observer = utils_angle_difference(phase_bemf, phase_val_last);
+
+				enc_val_last = encoder_read_deg();
+				phase_val_last = phase_bemf;
+
+				enc_ratio_sum += diff_observer / diff_encoder;
+				enc_samples += 1.0;
+				enc_travel += fabsf(diff_encoder);
+			}
+
+			const float travel_for_ratio = 40.0;
+
+			if (enc_travel >= travel_for_ratio) {
+				float ratio = roundf(SIGN(enc_ratio_sum) * enc_ratio_sum / enc_samples);
+				bool inverted = enc_ratio_sum < 0.0;
+
+				float phase_tmp = encoder_read_deg();
+				if (inverted) {
+					phase_tmp = 360.0 - phase_tmp;
+				}
+				phase_tmp *= ratio;
+
+				float s, c;
+				sincosf(DEG2RAD_f(utils_angle_difference(phase_tmp, phase_bemf)), &s, &c);
+				enc_diff_sin += s;
+				enc_diff_cos += c;
+
+				if (enc_travel >= (360.0 + travel_for_ratio) && !enc_res_set) {
+					if (enc_offset) {
+						*enc_offset = RAD2DEG_f(atan2f(enc_diff_sin, enc_diff_cos));
+						utils_norm_angle(enc_offset);
+					}
+					if (enc_ratio) {
+						*enc_ratio = ratio;
+					}
+					if (enc_inverted) {
+						*enc_inverted = inverted;
+					}
+
+					enc_res_set = true;
+				}
+			}
 
 			linkage_samples += 1.0;
 			chThdSleep(1);
@@ -1270,7 +1335,7 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
  * @return
  * The fault code
  */
-int conf_general_autodetect_apply_sensors_foc(float current,
+__attribute__((section(".text2"))) int conf_general_autodetect_apply_sensors_foc(float current,
 											  bool store_mcconf_on_success, bool send_mcconf_on_success, int *result) {
 	*result = -1;
 	int fault = FAULT_CODE_NONE;
@@ -1444,7 +1509,7 @@ int conf_general_autodetect_apply_sensors_foc(float current,
 	return fault;
 }
 
-void conf_general_calc_apply_foc_cc_kp_ki_gain(mc_configuration *mcconf, float tc) {
+__attribute__((section(".text2"))) void conf_general_calc_apply_foc_cc_kp_ki_gain(mc_configuration *mcconf, float tc) {
 	float r = mcconf->foc_motor_r;
 	float l = mcconf->foc_motor_l;
 	float lambda = mcconf->foc_motor_flux_linkage;
@@ -1460,7 +1525,7 @@ void conf_general_calc_apply_foc_cc_kp_ki_gain(mc_configuration *mcconf, float t
 	mcconf->foc_observer_gain = gain * 1e6;
 }
 
-static int measure_r_l_imax(float current_min, float current_max,
+__attribute__((section(".text2"))) static int measure_r_l_imax(float current_min, float current_max,
 							float max_power_loss, float *r, float *l, float *ld_lq_diff, float *i_max) {
 	float current_start = current_max / 50;
 	if (current_start < (current_min * 1.1)) {
@@ -1614,7 +1679,8 @@ static void measure_flux_linkage_task(void *arg) {
 				&linkage,
 				&linkage_undriven,
 				&undriven_samples,
-				&args->result);
+				&args->result,
+				0, 0, 0);
 
 	if (undriven_samples > 60) {
 		args->linkage = linkage_undriven;
@@ -1851,8 +1917,11 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 	float lambda_undriven = 0.0;
 	float lambda_undriven_samples = 0.0;
 	bool res;
+	float enc_offset = 0.0, enc_ratio = 0.0;
+	bool enc_inverted = 0.0;
 	faultM1 = conf_general_measure_flux_linkage_openloop(i_max / 2.5, 0.3, 1800, r, l,
-														 &lambda, &lambda_undriven, &lambda_undriven_samples, &res);
+														 &lambda, &lambda_undriven, &lambda_undriven_samples, &res,
+														 &enc_offset, &enc_ratio, &enc_inverted);
 
 	if (lambda_undriven_samples > 60) {
 		lambda = lambda_undriven;
@@ -1897,14 +1966,22 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 	if (res && res_linkage_m2) {
 		mcconf_old->l_current_max = i_max;
 		mcconf_old->l_current_min = -i_max;
+#ifndef HW_NO_ABS_MAX_CALC
 		float abs_max = i_max * 1.5;
 		utils_truncate_number(&abs_max, HW_LIM_CURRENT_ABS);
-		mcconf_old->l_abs_current_max = abs_max;		
+		mcconf_old->l_abs_current_max = abs_max;
+#endif
 		mcconf_old->motor_type = MOTOR_TYPE_FOC;
 		mcconf_old->foc_motor_r = r;
 		mcconf_old->foc_motor_l = l;
 		mcconf_old->foc_motor_ld_lq_diff = ld_lq_diff;
 		mcconf_old->foc_motor_flux_linkage = lambda;
+
+		if (enc_offset >= 0.0 && enc_ratio >= 0.0) {
+			mcconf_old->foc_encoder_offset = enc_offset;
+			mcconf_old->foc_encoder_ratio = enc_ratio;
+			mcconf_old->foc_encoder_inverted = enc_inverted;
+		}
 
 		if (mc_interface_temp_motor_filtered() > -10) {
 			mcconf_old->foc_temp_comp_base_temp = mc_interface_temp_motor_filtered();
@@ -1919,9 +1996,11 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 #ifdef HW_HAS_DUAL_MOTORS
 		mcconf_old_second->l_current_max = r_l_imax_args.i_max;
 		mcconf_old_second->l_current_min = -r_l_imax_args.i_max;
+#ifndef HW_NO_ABS_MAX_CALC
 		abs_max = r_l_imax_args.i_max * 1.5;
 		utils_truncate_number(&abs_max, HW_LIM_CURRENT_ABS);
 		mcconf_old_second->l_abs_current_max = abs_max;
+#endif
 		mcconf_old_second->motor_type = MOTOR_TYPE_FOC;
 		mcconf_old_second->foc_motor_r = r_l_imax_args.r;
 		mcconf_old_second->foc_motor_l = r_l_imax_args.l;
@@ -2201,5 +2280,3 @@ int conf_general_detect_apply_all_foc_can(bool detect_can, float max_power_loss,
 
 	return res;
 }
-
-#pragma GCC pop_options

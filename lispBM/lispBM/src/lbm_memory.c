@@ -1,5 +1,5 @@
 /*
-    Copyright 2020 - 2024 Joel Svensson  svenssonjoel@yahoo.se
+    Copyright 2020 - 2025 Joel Svensson  svenssonjoel@yahoo.se
                      2024 Benjamin Vedder
 
     This program is free software: you can redistribute it and/or modify
@@ -45,12 +45,13 @@ static lbm_uint memory_size;  // in 4 or 8 byte words depending on 32 or 64 bit 
 static lbm_uint bitmap_size;  // in 4 or 8 byte words
 static lbm_uint memory_base_address = 0;
 static lbm_uint memory_num_free = 0;
+static lbm_uint memory_min_free = 0;
 static volatile lbm_uint memory_reserve_level = 0;
 static mutex_t lbm_mem_mutex;
 static bool    lbm_mem_mutex_initialized;
 static lbm_uint alloc_offset = 0;
 
-int lbm_memory_init(lbm_uint *data, lbm_uint data_size,
+bool lbm_memory_init(lbm_uint *data, lbm_uint data_size,
                     lbm_uint *bits, lbm_uint bits_size) {
 
   if (!lbm_mem_mutex_initialized) {
@@ -61,33 +62,35 @@ int lbm_memory_init(lbm_uint *data, lbm_uint data_size,
   alloc_offset = 0;
 
   mutex_lock(&lbm_mem_mutex);
-  int res = 0;
-  if (data == NULL || bits == NULL) return 0;
+  bool res = false;
+  if (data && bits) {
 
-  if (((lbm_uint)data % sizeof(lbm_uint) != 0) ||
-      (data_size * 2) != (bits_size * sizeof(lbm_uint) * 8) ||
-      data_size % 4 != 0 ||
-      ((lbm_uint)bits % sizeof(lbm_uint) != 0) ||
-      bits_size < 1 ||
-      bits_size % 4 != 0) {
-    // data is not aligned to sizeof lbm_uint
-    // size is too small
-    // or size is not a multiple of 4
-  } else {
+    if (((lbm_uint)data % sizeof(lbm_uint) != 0) ||
+        (data_size * 2) != (bits_size * sizeof(lbm_uint) * 8) ||
+        data_size % 4 != 0 ||
+        ((lbm_uint)bits % sizeof(lbm_uint) != 0) ||
+        bits_size < 1 ||
+        bits_size % 4 != 0) {
+      // data is not aligned to sizeof lbm_uint
+      // size is too small
+      // or size is not a multiple of 4
+    } else {
 
-    bitmap = bits;
-    bitmap_size = bits_size;
+      bitmap = bits;
+      bitmap_size = bits_size;
 
-    for (lbm_uint i = 0; i < bitmap_size; i ++) {
-      bitmap[i] = 0;
+      for (lbm_uint i = 0; i < bitmap_size; i ++) {
+        bitmap[i] = 0;
+      }
+
+      memory = data;
+      memory_base_address = (lbm_uint)data;
+      memory_size = data_size;
+      memory_min_free = data_size;
+      memory_num_free = data_size;
+      memory_reserve_level = (lbm_uint)(0.1 * (lbm_float)data_size);
+      res = true;
     }
-
-    memory = data;
-    memory_base_address = (lbm_uint)data;
-    memory_size = data_size;
-    memory_num_free = data_size;
-    memory_reserve_level = (lbm_uint)(0.1 * (lbm_float)data_size);
-    res = 1;
   }
   mutex_unlock(&lbm_mem_mutex);
   return res;
@@ -138,9 +141,6 @@ static inline lbm_uint status(lbm_uint i) {
   lbm_uint bit_ix  = ix & WORD_MOD_MASK;              // % 32
 
   lbm_uint mask = ((lbm_uint)3) << bit_ix;       // 000110..0
-  if (word_ix > bitmap_size) {
-    return (lbm_uint)NULL;
-  }
   return (bitmap[word_ix] & mask) >> bit_ix;
 }
 
@@ -161,47 +161,16 @@ lbm_uint lbm_memory_num_words(void) {
 }
 
 lbm_uint lbm_memory_num_free(void) {
-  if (memory == NULL || bitmap == NULL) {
-    return 0;
-  }
-  mutex_lock(&lbm_mem_mutex);
-  unsigned int state = INIT;
-  lbm_uint sum_length = 0;
+  return memory_num_free;
+}
 
-  for (unsigned int i = 0; i < (bitmap_size << BITMAP_SIZE_SHIFT); i ++) {
+lbm_uint lbm_memory_maximum_used(void) {
+  return (memory_size - memory_min_free);
+}
 
-    switch(status(i)) {
-    case FREE_OR_USED:
-      switch (state) {
-      case INIT:
-          state = FREE_LENGTH_CHECK;
-          sum_length ++;
-        break;
-      case FREE_LENGTH_CHECK:
-        sum_length ++;
-        state = FREE_LENGTH_CHECK;
-        break;
-      case SKIP:
-        break;
-      }
-      break;
-    case END:
-      state = INIT;
-      break;
-    case START:
-      state = SKIP;
-      break;
-    case START_END:
-      state = INIT;
-      break;
-    default:
-      mutex_unlock(&lbm_mem_mutex);
-      return 0;
-      break;
-    }
-  }
-  mutex_unlock(&lbm_mem_mutex);
-  return sum_length;
+void lbm_memory_update_min_free(void) {
+  if (memory_num_free < memory_min_free)
+    memory_min_free = memory_num_free;
 }
 
 lbm_uint lbm_memory_longest_free(void) {
@@ -213,8 +182,9 @@ lbm_uint lbm_memory_longest_free(void) {
   lbm_uint max_length = 0;
 
   lbm_uint curr_length = 0;
-  for (unsigned int i = 0; i < (bitmap_size << BITMAP_SIZE_SHIFT); i ++) {
+  for (unsigned int i = 0; i < memory_size; i ++) {
 
+    // The status field is 2 bits and this 4 cases is exhaustive!
     switch(status(i)) {
     case FREE_OR_USED:
       switch (state) {
@@ -238,19 +208,19 @@ lbm_uint lbm_memory_longest_free(void) {
     case START:
       state = SKIP;
       break;
-    case START_END:
+    default: // START_END
       state = INIT;
-      break;
-    default:
-      mutex_unlock(&lbm_mem_mutex);
-      return 0;
       break;
     }
   }
   mutex_unlock(&lbm_mem_mutex);
   if (memory_num_free - max_length < memory_reserve_level) {
     lbm_uint n = memory_reserve_level - (memory_num_free - max_length);
-    max_length -= n;
+    if (n >= max_length) {
+      max_length = 0;
+    } else {
+      max_length -= n;
+    }
   }
   return max_length;
 }
@@ -267,9 +237,8 @@ static lbm_uint *lbm_memory_allocate_internal(lbm_uint num_words) {
   lbm_uint end_ix = 0;
   lbm_uint free_length = 0;
   unsigned int state = INIT;
-  lbm_uint loop_max = (bitmap_size << BITMAP_SIZE_SHIFT);
 
-  for (lbm_uint i = 0; i < loop_max; i ++) {
+  for (lbm_uint i = 0; i < memory_size; i ++) {
     switch(status(alloc_offset)) {
     case FREE_OR_USED:
       switch (state) {
@@ -302,18 +271,15 @@ static lbm_uint *lbm_memory_allocate_internal(lbm_uint num_words) {
     case START:
       state = SKIP;
       break;
-    case START_END:
+    default: // START_END
       state = INIT;
       break;
-    default: // error case
-      mutex_unlock(&lbm_mem_mutex);
-      return NULL;
     }
 
     if (state == ALLOC_DONE) break;
 
     alloc_offset++;
-    if (alloc_offset == loop_max ) {
+    if (alloc_offset == memory_size ) {
       free_length = 0;
       alloc_offset = 0;
       state = INIT;
@@ -345,16 +311,15 @@ lbm_uint *lbm_memory_allocate(lbm_uint num_words) {
 
 int lbm_memory_free(lbm_uint *ptr) {
   int r = 0;
-  lbm_uint count_freed = 0;
   if (lbm_memory_ptr_inside(ptr)) {
     mutex_lock(&lbm_mem_mutex);
     lbm_uint ix = address_to_bitmap_ix(ptr);
+    lbm_uint count_freed = 0;
     alloc_offset = ix;
-
     switch(status(ix)) {
     case START:
       set_status(ix, FREE_OR_USED);
-      for (lbm_uint i = ix; i < (bitmap_size << BITMAP_SIZE_SHIFT); i ++) {
+      for (lbm_uint i = ix; i < memory_size; i ++) {
         count_freed ++;
         if (status(i) == END) {
           set_status(i, FREE_OR_USED);
@@ -431,7 +396,7 @@ int lbm_memory_shrink(lbm_uint *ptr, lbm_uint n) {
   bool done = false;
   unsigned int i = 0;
 
-  for (i = 0; i < ((bitmap_size << BITMAP_SIZE_SHIFT) - ix); i ++) {
+  for (i = 0; i < (memory_size - ix); i ++) {
     if (status(ix+i) == END && i < n) {
       mutex_unlock(&lbm_mem_mutex);
       return 0; // cannot shrink allocation to a larger size
@@ -456,7 +421,7 @@ int lbm_memory_shrink(lbm_uint *ptr, lbm_uint n) {
   lbm_uint count = 0;
   if (!done) {
     i++; // move to next position, prev position should be END or START_END
-    for (;i < ((bitmap_size << BITMAP_SIZE_SHIFT) - ix); i ++) {
+    for (;i < (memory_size - ix); i ++) {
       count ++;
       if (status(ix+i) == END) {
         set_status(ix+i, FREE_OR_USED);

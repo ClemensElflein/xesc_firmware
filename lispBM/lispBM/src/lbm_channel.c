@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 Joel Svensson        svenssonjoel@yahoo.se
+    Copyright 2022, 2025 Joel Svensson        svenssonjoel@yahoo.se
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,6 +17,7 @@
 
 #include <lbm_channel.h>
 #include <string.h>
+#include <lbm_defines.h>
 
 /* ------------------------------------------------------------
    Interface
@@ -77,9 +78,17 @@ unsigned int lbm_channel_column(lbm_char_channel_t *chan) {
   return chan->column(chan);
 }
 
+bool lbm_channel_may_block(lbm_char_channel_t *chan) {
+  return chan->may_block(chan);
+}
+
 /* ------------------------------------------------------------
    Implementation buffered channel
    ------------------------------------------------------------ */
+bool buffered_may_block(lbm_char_channel_t *chan) {
+  (void) chan;
+  return true;
+}
 
 bool buffered_more(lbm_char_channel_t *chan) {
   lbm_buffered_channel_state_t *st = (lbm_buffered_channel_state_t*)chan->state;
@@ -154,7 +163,7 @@ bool buffered_read(lbm_char_channel_t *chan, char *res) {
     *res = buffer[st->read_pos];
     st->column++;
     if (*res == '\n') {
-      st->column = 0;
+      st->column = 1;
       st->row ++;
     }
     st->read_pos = (st->read_pos + 1) % TOKENIZER_BUFFER_SIZE;
@@ -241,11 +250,17 @@ void lbm_create_buffered_char_channel(lbm_buffered_channel_state_t *st,
   chan->reader_is_closed = buffered_reader_is_closed;
   chan->row = buffered_row;
   chan->column = buffered_column;
+  chan->may_block = buffered_may_block;
 }
 
 /* ------------------------------------------------------------
    Implementation string channel
    ------------------------------------------------------------ */
+
+bool string_may_block(lbm_char_channel_t *chan) {
+  (void) chan;
+  return false;
+}
 
 bool string_more(lbm_char_channel_t *chan) {
   lbm_string_channel_state_t *st = (lbm_string_channel_state_t*)chan->state;
@@ -334,7 +349,7 @@ int string_write(lbm_char_channel_t *chan, char c) {
   lbm_string_channel_state_t *st = (lbm_string_channel_state_t*)chan->state;
   char *str = st->str;
 
-  if (st->write_pos < st->length - 1) {
+  if (st->write_pos < st->length) {
     str[st->write_pos] = c;
     st->write_pos = st->write_pos + 1;
   } else {
@@ -376,6 +391,7 @@ void lbm_create_string_char_channel(lbm_string_channel_state_t *st,
   st->row = 1;
   st->column = 1;
 
+  chan->dependency = ENC_SYM_NIL;
   chan->state = st;
   chan->more = string_more;
   chan->peek = string_peek;
@@ -391,6 +407,7 @@ void lbm_create_string_char_channel(lbm_string_channel_state_t *st,
   chan->reader_is_closed = string_reader_is_closed;
   chan->row = string_row;
   chan->column = string_column;
+  chan->may_block = string_may_block;
 }
 
 void lbm_create_string_char_channel_size(lbm_string_channel_state_t *st,
@@ -406,6 +423,7 @@ void lbm_create_string_char_channel_size(lbm_string_channel_state_t *st,
   st->row = 1;
   st->column = 1;
 
+  chan->dependency = ENC_SYM_NIL;
   chan->state = st;
   chan->more = string_more;
   chan->peek = string_peek;
@@ -421,4 +439,10 @@ void lbm_create_string_char_channel_size(lbm_string_channel_state_t *st,
   chan->reader_is_closed = string_reader_is_closed;
   chan->row = string_row;
   chan->column = string_column;
+  chan->may_block = string_may_block;
 }
+
+void lbm_char_channel_set_dependency(lbm_char_channel_t *chan, lbm_value dep) {
+  chan->dependency = dep;
+}
+

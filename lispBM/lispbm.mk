@@ -12,18 +12,21 @@ LISPBMSRC = $(LISPBM)/src/env.c \
             $(LISPBM)/src/lispbm.c \
             $(LISPBM)/src/eval_cps.c \
             $(LISPBM)/platform/chibios/src/platform_mutex.c \
+            $(LISPBM)/platform/chibios/src/platform_timestamp.c \
             $(LISPBM)/src/lbm_channel.c \
             $(LISPBM)/src/lbm_c_interop.c \
             $(LISPBM)/src/lbm_custom_type.c \
-            $(LISPBM)/src/lbm_flags.c \
             $(LISPBM)/src/lbm_flat_value.c \
             $(LISPBM)/src/lbm_prof.c \
+            $(LISPBM)/src/lbm_defrag_mem.c \
+            $(LISPBM)/src/lbm_image.c \
             $(LISPBM)/src/extensions/array_extensions.c \
             $(LISPBM)/src/extensions/math_extensions.c \
             $(LISPBM)/src/extensions/string_extensions.c \
+            $(LISPBM)/src/extensions/mutex_extensions.c \
+            $(LISPBM)/src/extensions/lbm_dyn_lib.c \
 			lispBM/lispif.c \
 			lispBM/lispif_vesc_extensions.c \
-			lispBM/lispif_vesc_dynamic_loader.c \
 			lispBM/lispif_c_lib.c \
             lispBM/lbm_vesc_utils.c
 

@@ -26,11 +26,23 @@
 
 static lbm_value env_global[GLOBAL_ENV_ROOTS];
 
-int lbm_init_env(void) {
+bool lbm_init_env(void) {
   for (int i = 0; i < GLOBAL_ENV_ROOTS; i ++) {
     env_global[i] = ENC_SYM_NIL;
   }
-  return 1;
+  return true;
+}
+
+lbm_uint lbm_get_global_env_size(void) {
+  lbm_uint n = 0;
+  for (int i = 0; i < GLOBAL_ENV_ROOTS; i ++) {
+    lbm_value curr = env_global[i];
+    while (lbm_is_cons(curr)) {
+      n++;
+      curr = lbm_cdr(curr);
+    }
+  }
+  return n;
 }
 
 lbm_value *lbm_get_global_env(void) {
@@ -57,18 +69,22 @@ lbm_value lbm_env_copy_spine(lbm_value env) {
   return r;
 }
 
-// A less safe version of lookup. It should be fine unless env is corrupted.
+// env_lookup that should be safe even in the presence of incorrectly
+// structured env. Could be the case when user manually creates closure.
 bool lbm_env_lookup_b(lbm_value *res, lbm_value sym, lbm_value env) {
-
   lbm_value curr = env;
 
   while (lbm_is_ptr(curr)) {
-    lbm_value c = lbm_ref_cell(curr)->car;
-    if ((lbm_ref_cell(c)->car) == sym) {
-      *res = lbm_ref_cell(c)->cdr;
-      return true;
+    lbm_cons_t *cr = lbm_ref_cell(curr);
+    if (lbm_is_ptr(cr->car)) {
+      lbm_cons_t *pair = lbm_ref_cell(cr->car);
+      if ((pair->car == sym)
+          && (pair->cdr != ENC_SYM_PLACEHOLDER)) {
+        *res = pair->cdr;
+        return true;
+      }
     }
-    curr = lbm_ref_cell(curr)->cdr;
+    curr = cr->cdr;
   }
   return false;
 }
@@ -87,19 +103,6 @@ bool lbm_global_env_lookup(lbm_value *res, lbm_value sym) {
     curr = lbm_ref_cell(curr)->cdr;
   }
   return false;
-}
-
-lbm_value lbm_env_lookup(lbm_value sym, lbm_value env) {
-  lbm_value curr = env;
-
-  while (lbm_type_of(curr) == LBM_TYPE_CONS) {
-    lbm_value car_val = lbm_car(curr);
-    if (lbm_car(car_val) == sym) {
-      return lbm_cdr(car_val);
-    }
-    curr = lbm_cdr(curr);
-  }
-  return ENC_SYM_NOT_FOUND;
 }
 
 // TODO: env set should ideally copy environment if it has to update
@@ -129,28 +132,6 @@ lbm_value lbm_env_set(lbm_value env, lbm_value key, lbm_value val) {
   return new_env;
 }
 
-// TODO: same remark as lbm_set_env
-lbm_value lbm_env_set_functional(lbm_value env, lbm_value key, lbm_value val) {
-
-  lbm_value keyval = lbm_cons(key, val);
-  if (lbm_type_of(keyval) == LBM_TYPE_SYMBOL) {
-    return keyval;
-  }
-
-  lbm_value curr = env;
-
-  while(lbm_type_of(curr) == LBM_TYPE_CONS) {
-    if (lbm_caar(curr) == key) {
-      lbm_set_car(curr,keyval);
-      return env;
-    }
-    curr = lbm_cdr(curr);
-  }
-
-  lbm_value new_env = lbm_cons(keyval, env);
-  return new_env;
-}
-
 lbm_value lbm_env_modify_binding(lbm_value env, lbm_value key, lbm_value val) {
 
   lbm_value curr = env;
@@ -167,11 +148,18 @@ lbm_value lbm_env_modify_binding(lbm_value env, lbm_value key, lbm_value val) {
   return ENC_SYM_NOT_FOUND;
 }
 
+
+// TODO: Drop binding should really return a new environment
+//       where the drop key/val is missing.
+//  
+//       The internal use of drop_binding in fundamental undefine
+//       is probably fine as we do not generally treat environments
+//       as first order values. If we did, drop_binding is too destructive!
 lbm_value lbm_env_drop_binding(lbm_value env, lbm_value key) {
 
   lbm_value curr = env;
   // If key is first in env
-  if (lbm_car(lbm_car(curr)) == key) {
+  if (lbm_caar(curr) == key) {
     return lbm_cdr(curr);
   }
 
