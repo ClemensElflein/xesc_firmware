@@ -11,9 +11,10 @@ HWSRC =	\
 	hwconf/si8900.c \
 	hwconf/shutdown.c \
 	hwconf/tmc6200.c \
-	hwconf/xtech/xesc2-mini/xesc2_variant_config.c
+	hwconf/drv8376.c \
+	hwconf/xtech/xesc2_mini/xesc2_variant_config.c
 
 HWINC = hwconf \
 		hwconf/luna \
 		hwconf/other \
-		hwconf/xtech/xesc2-mini
+		hwconf/xtech/xesc2_mini
