@@ -10,7 +10,8 @@ HWSRC =	\
 	hwconf/luna/m600/luna_m600_display.c \
 	hwconf/si8900.c \
 	hwconf/shutdown.c \
-	hwconf/tmc6200.c
+	hwconf/tmc6200.c \
+	hwconf/drv8376.c
 
 HWINC = hwconf \
 		hwconf/luna \
