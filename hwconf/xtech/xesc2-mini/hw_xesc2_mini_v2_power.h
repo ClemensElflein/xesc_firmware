@@ -1,5 +1,6 @@
 /*
     Copyright 2016 - 2020 Benjamin Vedder	benjamin@vedder.se
+    Copyright 2024 - 2026 xESC Project
 
     This file is part of the VESC firmware.
 
@@ -17,13 +18,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
-#ifndef HW_XESC2_H_
-#define HW_XESC2_H_
+#ifndef HW_XESC2_MINI_V2_POWER_H_
+#define HW_XESC2_MINI_V2_POWER_H_
 
 bool tmc_error(void);
 void tmc6200_reset_faults(void);
 
-#define HW_NAME "xESC2"
+#define HW_NAME "xESC2 V2.x Power"
 
 #define HW_MAJOR 2
 #define HW_MINOR 0
@@ -34,7 +35,7 @@ void tmc6200_reset_faults(void);
 #define HW_HAS_PHASE_SHUNTS
 
 // TMC6200 configuration
-#define TMC6200_CURRENT_AMP_GAIN 5
+#define TMC6200_CURRENT_AMP_GAIN 10
 
 // Macros
 #define ENABLE_GATE() palSetPad(GPIOB, 5)
@@ -101,17 +102,19 @@ void tmc6200_reset_faults(void);
 #ifndef VIN_R2
 #define VIN_R2 1500.0
 #endif
+
+// V2 "Power" variant
 #ifndef CURRENT_AMP_GAIN
-#define CURRENT_AMP_GAIN (5.0 * 0.595)
+#define CURRENT_AMP_GAIN 10.0
 #endif
 #ifndef CURRENT_SHUNT_RES
-#define CURRENT_SHUNT_RES 0.033
+#define CURRENT_SHUNT_RES 0.003
 #endif
 
-// We need to scale the ADC_Value because of the voltage divider between the gate driver and the analog inputs
-#define GET_CURRENT1() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1] * 1.11f)))
-#define GET_CURRENT2() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2] * 1.11f)))
-#define GET_CURRENT3() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3] * 1.11f)))
+// Calibrated scaling factor for xESC2-mini V2 Power hardware
+#define GET_CURRENT1() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1] * 0.935f)))
+#define GET_CURRENT2() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2] * 0.935f)))
+#define GET_CURRENT3() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3] * 0.935f)))
 
 // Input voltage
 #define GET_INPUT_VOLTAGE() ((V_REG / 4095.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2))
@@ -227,28 +230,32 @@ void tmc6200_reset_faults(void);
 #define MCCONF_DEFAULT_MOTOR_TYPE MOTOR_TYPE_FOC
 #endif
 #ifndef MCCONF_L_MAX_ABS_CURRENT
-#define MCCONF_L_MAX_ABS_CURRENT 15.0 // The maximum absolute current above which a fault is generated
+#define MCCONF_L_MAX_ABS_CURRENT 25.0 // The maximum absolute current above which a fault is generated
 #endif
 #ifndef MCCONF_FOC_SAMPLE_V0_V7
 #define MCCONF_FOC_SAMPLE_V0_V7 false // Run control loop in both v0 and v7 (requires phase shunts)
 #endif
 
-#define MCCONF_L_CURRENT_MAX 6.0     // Current limit in Amperes (Upper)
-#define MCCONF_L_CURRENT_MIN -6.0    // Current limit in Amperes (Lower)
-#define MCCONF_L_IN_CURRENT_MAX 2.0  // Input current limit in Amperes (Upper)
-#define MCCONF_L_IN_CURRENT_MIN -2.0 // Input current limit in Amperes (Lower)
+// Power variant current limits
+// VM traces (VBat): 11.2A constant -> input limit 11.0A
+// Phase traces: 12A constant -> software limit 11.5A
+#define MCCONF_L_CURRENT_MAX 11.5     // Phase current limit in Amperes (Upper)
+#define MCCONF_L_CURRENT_MIN -11.5    // Phase current limit in Amperes (Lower)
+#define MCCONF_L_IN_CURRENT_MAX 11.0  // Input current limit in Amperes (Upper)
+#define MCCONF_L_IN_CURRENT_MIN -11.0 // Input current limit in Amperes (Lower)
 
 #define APPCONF_IMU_TYPE IMU_TYPE_OFF
 
 // Setting limits
-#define HW_LIM_CURRENT -15.0, 15.0
-#define HW_LIM_CURRENT_IN -10.0, 10.0
-#define HW_LIM_CURRENT_ABS 0.0, 15.0
-#define HW_LIM_VIN 6.0, 57.0
+// VM traces: 11.2A constant, Phase traces: 12A constant
+#define HW_LIM_CURRENT -11.5, 11.5
+#define HW_LIM_CURRENT_IN -11.0, 11.0
+#define HW_LIM_CURRENT_ABS 0.0, 25.0
+#define HW_LIM_VIN 9.0, 48.0
 #define HW_LIM_ERPM -200e3, 200e3
 #define HW_LIM_DUTY_MIN 0.0, 0.1
 #define HW_LIM_DUTY_MAX 0.0, 0.99
-#define HW_LIM_TEMP_FET -40.0, 90.0
+#define HW_LIM_TEMP_FET -40.0, 85.0
 #define HW_MAX_CURRENT_OFFSET 620
 
-#endif /* HW_XESC2_H_ */
+#endif /* HW_XESC2_MINI_V2_POWER_H_ */
