@@ -36,6 +36,7 @@ void tmc6200_reset_faults(void);
 
 // TMC6200 configuration
 #define TMC6200_CURRENT_AMP_GAIN 10
+#define TMC6200_DRVSTRENGTH 3 // Strong gate drive for BSC0702LS (1300pF Ciss) at VIO=3.3V
 
 // Macros
 #define ENABLE_GATE() palSetPad(GPIOB, 5)

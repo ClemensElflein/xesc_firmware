@@ -307,6 +307,10 @@ void tmc6200_reset_faults(void)
 #define TMC6200_GAIN_VALUE 0
 #endif
 
+#ifndef TMC6200_DRVSTRENGTH
+#define TMC6200_DRVSTRENGTH 2 // Default: medium
+#endif
+
 void tmc6200_write_conf(void)
 {
     // Driver comms OK, configure TMC6200
@@ -316,6 +320,7 @@ void tmc6200_write_conf(void)
                          (1UL << TMC6200_FAULTDIRECT_SHIFT) |
                          ((uint32_t)TMC6200_GAIN_VALUE << TMC6200_AMPLIFICATION_SHIFT));
     tmc6200_writeInt(0, TMC6200_GSTAT, 0xFFFF);
+    tmc6200_writeInt(0, TMC6200_DRV_CONF, ((uint32_t)TMC6200_DRVSTRENGTH << TMC6200_DRVSTRENGTH_SHIFT));
     tmc6200_writeInt(0, TMC6200_SHORT_CONF, (1UL << TMC6200_DISABLE_S2G_SHIFT) | (1UL << TMC6200_DISABLE_S2VS_SHIFT));
 }
 
