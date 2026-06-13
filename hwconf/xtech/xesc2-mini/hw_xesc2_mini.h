@@ -20,10 +20,12 @@
 #ifndef HW_XESC2_H_
 #define HW_XESC2_H_
 
+#include "xesc2_variant_config.h"
+
 bool tmc_error(void);
 void tmc6200_reset_faults(void);
 
-#define HW_NAME "xESC2"
+#define HW_NAME (g_xesc2_variant->hw_name)
 
 #define HW_MAJOR 2
 #define HW_MINOR 0
@@ -33,8 +35,9 @@ void tmc6200_reset_faults(void);
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
 
-// TMC6200 configuration
-#define TMC6200_CURRENT_AMP_GAIN 5
+// TMC6200 configuration (runtime from variant)
+#define TMC6200_CURRENT_AMP_GAIN (g_xesc2_variant->tmc6200_amp_gain)
+#define TMC6200_DRVSTRENGTH (g_xesc2_variant->tmc6200_drvstrength)
 
 // Macros
 #define ENABLE_GATE() palSetPad(GPIOB, 5)
@@ -91,7 +94,7 @@ void tmc6200_reset_faults(void);
 
 // ADC macros and settings
 
-// Component parameters (can be overridden)
+// Component parameters (runtime from variant)
 #ifndef V_REG
 #define V_REG 3.3
 #endif
@@ -102,16 +105,16 @@ void tmc6200_reset_faults(void);
 #define VIN_R2 1500.0
 #endif
 #ifndef CURRENT_AMP_GAIN
-#define CURRENT_AMP_GAIN (5.0 * 0.595)
+#define CURRENT_AMP_GAIN (g_xesc2_variant->current_amp_gain)
 #endif
 #ifndef CURRENT_SHUNT_RES
-#define CURRENT_SHUNT_RES 0.033
+#define CURRENT_SHUNT_RES (g_xesc2_variant->current_shunt_res)
 #endif
 
-// We need to scale the ADC_Value because of the voltage divider between the gate driver and the analog inputs
-#define GET_CURRENT1() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1] * 1.11f)))
-#define GET_CURRENT2() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2] * 1.11f)))
-#define GET_CURRENT3() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3] * 1.11f)))
+// ADC current scaling with calibrated factor per variant
+#define GET_CURRENT1() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1] * g_xesc2_variant->get_current_scale)))
+#define GET_CURRENT2() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2] * g_xesc2_variant->get_current_scale)))
+#define GET_CURRENT3() (int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3] * g_xesc2_variant->get_current_scale)))
 
 // Input voltage
 #define GET_INPUT_VOLTAGE() ((V_REG / 4095.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2))
@@ -222,33 +225,33 @@ void tmc6200_reset_faults(void);
 #define READ_HALL2() palReadPad(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2)
 #define READ_HALL3() palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3)
 
-// Default setting overrides
+// Default setting overrides (runtime from variant)
 #ifndef MCCONF_DEFAULT_MOTOR_TYPE
 #define MCCONF_DEFAULT_MOTOR_TYPE MOTOR_TYPE_FOC
 #endif
 #ifndef MCCONF_L_MAX_ABS_CURRENT
-#define MCCONF_L_MAX_ABS_CURRENT 15.0 // The maximum absolute current above which a fault is generated
+#define MCCONF_L_MAX_ABS_CURRENT (g_xesc2_variant->l_max_abs_current)
 #endif
 #ifndef MCCONF_FOC_SAMPLE_V0_V7
 #define MCCONF_FOC_SAMPLE_V0_V7 false // Run control loop in both v0 and v7 (requires phase shunts)
 #endif
 
-#define MCCONF_L_CURRENT_MAX 6.0     // Current limit in Amperes (Upper)
-#define MCCONF_L_CURRENT_MIN -6.0    // Current limit in Amperes (Lower)
-#define MCCONF_L_IN_CURRENT_MAX 2.0  // Input current limit in Amperes (Upper)
-#define MCCONF_L_IN_CURRENT_MIN -2.0 // Input current limit in Amperes (Lower)
+#define MCCONF_L_CURRENT_MAX (g_xesc2_variant->mcconf_l_current_max)
+#define MCCONF_L_CURRENT_MIN (g_xesc2_variant->mcconf_l_current_min)
+#define MCCONF_L_IN_CURRENT_MAX (g_xesc2_variant->mcconf_l_in_current_max)
+#define MCCONF_L_IN_CURRENT_MIN (g_xesc2_variant->mcconf_l_in_current_min)
 
 #define APPCONF_IMU_TYPE IMU_TYPE_OFF
 
-// Setting limits
-#define HW_LIM_CURRENT -15.0, 15.0
-#define HW_LIM_CURRENT_IN -10.0, 10.0
-#define HW_LIM_CURRENT_ABS 0.0, 15.0
-#define HW_LIM_VIN 6.0, 57.0
+// Setting limits (runtime from variant)
+#define HW_LIM_CURRENT (g_xesc2_variant->lim_current_min), (g_xesc2_variant->lim_current_max)
+#define HW_LIM_CURRENT_IN (g_xesc2_variant->lim_current_in_min), (g_xesc2_variant->lim_current_in_max)
+#define HW_LIM_CURRENT_ABS 0.0, (g_xesc2_variant->lim_current_abs_max)
+#define HW_LIM_VIN (g_xesc2_variant->lim_vin_min), (g_xesc2_variant->lim_vin_max)
 #define HW_LIM_ERPM -200e3, 200e3
 #define HW_LIM_DUTY_MIN 0.0, 0.1
 #define HW_LIM_DUTY_MAX 0.0, 0.99
-#define HW_LIM_TEMP_FET -40.0, 90.0
+#define HW_LIM_TEMP_FET -40.0, (g_xesc2_variant->lim_temp_fet_max)
 #define HW_MAX_CURRENT_OFFSET 620
 
 #endif /* HW_XESC2_H_ */

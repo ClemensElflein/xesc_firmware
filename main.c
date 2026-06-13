@@ -269,6 +269,10 @@ int main(void) {
 	mempools_init();
 	events_init();
 	timer_init(); // Initialize timer here to allow I2C in hw_init
+
+	// Detect and apply hardware variant before driver init
+	xesc2_detect_and_apply_variant();
+
 	hw_init_gpio();
 	LED_RED_OFF();
 	LED_GREEN_OFF();

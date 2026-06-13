@@ -53,7 +53,7 @@
 #include "imu.h"
 
 // Constants
-#define CAN_APP_NODE_NAME								"org.vesc." HW_NAME
+// CAN_APP_NODE_NAME removed — now using runtime OTP hw_name via g_xesc2_variant
 #define UNIQUE_ID_LENGTH_BYTES							12
 #define STATUS_MSGS_TO_STORE							10
 #define AP_MAX_NAME_SIZE								20
@@ -626,9 +626,11 @@ static void handle_get_node_info(CanardInstance* ins, CanardRxTransfer* transfer
 	pkt.hardware_version.minor = 0;
 #endif
 
-	char name[strlen(CAN_APP_NODE_NAME)+1];
-	strcpy(name, CAN_APP_NODE_NAME);
-	pkt.name.len = strlen(CAN_APP_NODE_NAME);
+	const char *hw_name = g_xesc2_variant->hw_name;
+	char name[strlen("org.vesc.") + strlen(hw_name) + 1];
+	strcpy(name, "org.vesc.");
+	strcat(name, hw_name);
+	pkt.name.len = strlen(name);
 	pkt.name.data = (uint8_t *)name;
 
 	uint16_t total_size = uavcan_protocol_GetNodeInfoResponse_encode(&pkt, msg_buffer);

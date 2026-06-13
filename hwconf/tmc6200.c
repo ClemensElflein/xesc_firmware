@@ -297,28 +297,35 @@ void tmc6200_reset_faults(void)
 #define TMC6200_CURRENT_AMP_GAIN 5
 #endif
 
-#if TMC6200_CURRENT_AMP_GAIN == 5
-#define TMC6200_GAIN_VALUE 0
-#elif TMC6200_CURRENT_AMP_GAIN == 10
-#define TMC6200_GAIN_VALUE 1
-#elif TMC6200_CURRENT_AMP_GAIN == 20
-#define TMC6200_GAIN_VALUE 3
-#else
-#define TMC6200_GAIN_VALUE 0
-#endif
-
 #ifndef TMC6200_DRVSTRENGTH
 #define TMC6200_DRVSTRENGTH 2 // Default: medium
 #endif
 
+static uint32_t tmc6200_gain_value_from_amp_gain(uint8_t amp_gain)
+{
+    switch (amp_gain)
+    {
+    case 5:
+        return 0;
+    case 10:
+        return 1;
+    case 20:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
 void tmc6200_write_conf(void)
 {
+    uint32_t gain_value = tmc6200_gain_value_from_amp_gain(TMC6200_CURRENT_AMP_GAIN);
+
     // Driver comms OK, configure TMC6200
     tmc6200_writeInt(0, TMC6200_GCONF,
                      (0UL << TMC6200_DISABLE_SHIFT) |
                          (0UL << TMC6200_SINGLELINE_SHIFT) |
                          (1UL << TMC6200_FAULTDIRECT_SHIFT) |
-                         ((uint32_t)TMC6200_GAIN_VALUE << TMC6200_AMPLIFICATION_SHIFT));
+                         (gain_value << TMC6200_AMPLIFICATION_SHIFT));
     tmc6200_writeInt(0, TMC6200_GSTAT, 0xFFFF);
     tmc6200_writeInt(0, TMC6200_DRV_CONF, ((uint32_t)TMC6200_DRVSTRENGTH << TMC6200_DRVSTRENGTH_SHIFT));
     tmc6200_writeInt(0, TMC6200_SHORT_CONF, (1UL << TMC6200_DISABLE_S2G_SHIFT) | (1UL << TMC6200_DISABLE_S2VS_SHIFT));
