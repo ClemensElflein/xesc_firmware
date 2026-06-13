@@ -137,13 +137,21 @@ Newer xESC2 ships with a factory-branded OTP identity record containing its boar
 
 Builder keys are 32-byte BLS12-381 private keys — generated once per builder and stored securely (e.g. `~/.config/xesc/keys/builder1.key`). The key is **only needed during branding** — not for building firmware or normal operation.
 
+### Prerequisites
+
+- Go toolchain (1.23+) — `sudo apt install golang`
+- [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html) — for OTP flashing (the tool auto-discovers it)
+- ST-Link V2/V3 debugger connected to the ESC
+
 ### Building the Branding Tool
 
 ```bash
-# Install Go toolchain (1.23+)
-sudo apt install golang
+# 1. Build blst (one-time)
+cd /tmp
+git clone https://github.com/supranational/blst.git
+cd blst && ./build.sh
 
-# Build the command
+# 2. Build the command
 cd cmd/otp_brand
 go build -o otp_brand .
 ```
@@ -151,23 +159,43 @@ go build -o otp_brand .
 ### Usage
 
 ```bash
-# 1. Generate a key (once per builder. Not required for individuals)
+# 1. Generate a builder key (once per builder)
 ./otp_brand --generate-key ~/.config/xesc/keys/builder1.key
+# -> ~/.config/xesc/keys/builder1.key      (private key, 32 bytes)
+# -> ~/.config/xesc/keys/builder1.key.pub  (public key, 96 bytes hex)
 
-# 2. Dry-run first
+# 2. Sign an OTP identity block
 ./otp_brand --type mini --variant v2_power --hw 2.0.1 \
-    --key ~/.config/xesc/keys/builder1.key --dry-run
+    --key ~/.config/xesc/keys/builder1.key --output otp_blocks.bin
 
-# 3. Write OTP and flash
+# 3. Verify the signature before flashing
+./otp_brand --verify otp_blocks.bin --key ~/.config/xesc/keys/builder1.key
+# or with public key only (no private key needed):
+./otp_brand --verify-pub otp_blocks.bin --key ~/.config/xesc/keys/builder1.key.pub
+
+# 4. Flash OTP to the device (uses STM32CubeProgrammer)
 ./otp_brand --type mini --variant v2_power --hw 2.0.1 \
     --key ~/.config/xesc/keys/builder1.key --flash
 ```
 
-| Flag          | Values                          |
-| ------------- | ------------------------------- |
-| `--type`      | `mini`, `lite`                  |
-| `--variant` | `v1_std`, `v2_power`            |
-| `--hw`        | `"2.0.1"` (`MAJOR.MINOR.PATCH`) |
+STM32CubeProgrammer discovery order: `$ST_PROGRAMMER_PATH` → `/usr/local/STMicroelectronics/...` → `/opt/STMicroelectronics/...` → `$PATH`.
+
+| Flag             | Values / Description                                     |
+| ---------------- | -------------------------------------------------------- |
+| `--type`         | `mini`, `lite`                                           |
+| `--variant`      | `v1_std`, `v2_power`                                     |
+| `--hw`           | `"2.0.1"` (`MAJOR.MINOR.PATCH`)                          |
+| `--key`          | Private key path (32 bytes), or public key for `--verify-pub` |
+| `--output`       | Output `.bin` path (default: `otp_blocks.bin`)           |
+| `--verify`       | Verify signature in a `.bin` using private key `--key`   |
+| `--verify-pub`   | Verify signature in a `.bin` using public key `--key`    |
+| `--generate-key` | Create new key pair at PATH                              |
+| `--dump-pubkey`  | Print public key for a private key file                  |
+| `--dry-run`      | Show what would be done without writing                  |
+| `--dump-c`       | Output C arrays for firmware `test_otp_block[]`          |
+| `--serial`       | Override auto-increment serial number                    |
+| `--pair`         | OTP pair index 0–7 (default: 0)                          |
+| `--force`        | Skip OTP occupation check                                |
 
 ## Contribute
 
