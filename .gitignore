@@ -20,3 +20,4 @@ workspace.code-workspace
 .idea/
 .vscode
 
+cmd/otp_brand/otp_blocks.bin

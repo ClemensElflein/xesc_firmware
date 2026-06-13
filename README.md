@@ -129,6 +129,46 @@ you will need to upload a new working firmware to the VESC.
 However, to upload a firmware to a bricked VESC, you have to use a SWD Debugger.
 
 
+## OTP Branding (xESC2 series)
+
+Newer xESC2 ships with a factory-branded OTP identity record containing its board type, hardware variant, and revision. This record is cryptographically signed with a **builder key** for future authenticity verification. Individuals do not need that.
+
+### Builder Keys
+
+Builder keys are 32-byte BLS12-381 private keys — generated once per builder and stored securely (e.g. `~/.config/xesc/keys/builder1.key`). The key is **only needed during branding** — not for building firmware or normal operation.
+
+### Building the Branding Tool
+
+```bash
+# Install Go toolchain (1.23+)
+sudo apt install golang
+
+# Build the command
+cd cmd/otp_brand
+go build -o otp_brand .
+```
+
+### Usage
+
+```bash
+# 1. Generate a key (once per builder. Not required for individuals)
+./otp_brand --generate-key ~/.config/xesc/keys/builder1.key
+
+# 2. Dry-run first
+./otp_brand --type mini --variant v2_power --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key --dry-run
+
+# 3. Write OTP and flash
+./otp_brand --type mini --variant v2_power --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key --flash
+```
+
+| Flag          | Values                          |
+| ------------- | ------------------------------- |
+| `--type`      | `mini`, `lite`                  |
+| `--variant` | `v1_std`, `v2_power`            |
+| `--hw`        | `"2.0.1"` (`MAJOR.MINOR.PATCH`) |
+
 ## Contribute
 
 Head to the [forums](https://vesc-project.com/forum) to get involved and improve this project.
