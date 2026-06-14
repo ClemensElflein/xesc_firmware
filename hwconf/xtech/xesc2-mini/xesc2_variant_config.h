@@ -30,6 +30,11 @@ typedef struct {
     uint8_t type_id;    // Board type from OTP (XESC2_TYPE_*)
     uint8_t variant_id; // Variant from OTP (XESC2_VARIANT_*)
     uint8_t valid;      // 1 if valid OTP record found
+    uint8_t hw_major;   // Hardware version major
+    uint8_t hw_minor;   // Hardware version minor
+    uint8_t hw_patch;   // Hardware version patch
+    uint16_t serial;    // Serial number
+    uint32_t timestamp; // Build Unix timestamp
 } xesc2_otp_identity_t;
 
 typedef struct {
@@ -59,8 +64,13 @@ typedef struct {
 // Global pointer to the active variant config, initialized at startup
 extern const xesc2_variant_config_t *g_xesc2_variant;
 
+// Global OTP identity, populated at startup
+extern xesc2_otp_identity_t g_xesc2_otp_identity;
+
 // Function declarations
 const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t variant_id);
 void xesc2_detect_and_apply_variant(void);
+void xesc2_terminal_otp_info(int argc, const char **argv);
+void xesc2_print_hw_status_otp_info(void);
 
 #endif /* XESC2_VARIANT_CONFIG_H_ */

@@ -21,9 +21,15 @@
 #include "xesc2_variant_config.h"
 #include "crc.h"
 #include "xesc2_otp.h"
+#include "commands.h"
+#include "terminal.h"
+#include <time.h>
 
 // Global pointer to the active variant configuration
 const xesc2_variant_config_t *g_xesc2_variant = 0;
+
+// Global OTP identity, populated at startup
+xesc2_otp_identity_t g_xesc2_otp_identity = {0, 0, 0, 0, 0, 0, 0, 0};
 
 // ------------------------------------------------------------------
 // CRC-16/CCITT-FALSE verification
@@ -61,7 +67,7 @@ static const uint8_t *otp_read_block(uint8_t pair_index)
 
 static xesc2_otp_identity_t otp_scan(void)
 {
-    xesc2_otp_identity_t id = {0, 0, 0};
+    xesc2_otp_identity_t id = {0, 0, 0, 0, 0, 0, 0, 0};
 
     // OTP pairs are at absolute addresses 0x1FFF7800 .. 0x1FFF79E0.
     // Scan from highest (last rebranding) to lowest (initial branding).
@@ -94,6 +100,15 @@ static xesc2_otp_identity_t otp_scan(void)
         {
             id.type_id = block[XESC2_OTP_OFFS_TYPE_ID];
             id.variant_id = block[XESC2_OTP_OFFS_VARIANT];
+            id.hw_major = block[XESC2_OTP_OFFS_HW_MAJOR];
+            id.hw_minor = block[XESC2_OTP_OFFS_HW_MINOR];
+            id.hw_patch = block[XESC2_OTP_OFFS_HW_PATCH];
+            id.serial = (uint16_t)block[XESC2_OTP_OFFS_SERIAL] |
+                        ((uint16_t)block[XESC2_OTP_OFFS_SERIAL + 1] << 8);
+            id.timestamp = (uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP] |
+                           ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 1] << 8) |
+                           ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 2] << 16) |
+                           ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 3] << 24);
             id.valid = 1;
             return id;
         }
@@ -181,10 +196,163 @@ const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t 
 void xesc2_detect_and_apply_variant(void) {
     xesc2_otp_identity_t id = otp_scan();
 
+    // Store the full identity for later use (hw_status, otp_info, etc.)
+    g_xesc2_otp_identity = id;
+
     if (id.valid) {
         g_xesc2_variant = xesc2_get_variant_config(id.type_id, id.variant_id);
     } else {
         // No valid OTP found — fall back to Mini Standard
         g_xesc2_variant = xesc2_get_variant_config(XESC2_TYPE_MINI, XESC2_VARIANT_V1_STD);
+    }
+}
+
+// ------------------------------------------------------------------
+// Terminal: otp_info command
+// ------------------------------------------------------------------
+void xesc2_terminal_otp_info(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+
+    commands_printf("OTP Memory Scan (0x%08X, %d pairs):",
+                    (unsigned int)XESC2_OTP_BASE_ADDR, XESC2_OTP_NUM_PAIRS);
+    commands_printf(" ");
+
+    int found = 0;
+    for (int pair = 0; pair < XESC2_OTP_NUM_PAIRS; pair++) {
+        const uint8_t *block = otp_read_block(pair);
+
+        uint8_t magic = block[XESC2_OTP_OFFS_MAGIC];
+        if (magic != XESC2_OTP_MAGIC) {
+            commands_printf("Pair %d: MAGIC INVALID (0x%02X)", pair, magic);
+            continue;
+        }
+
+        uint8_t ver = block[XESC2_OTP_OFFS_VERSION];
+        if (ver != XESC2_OTP_VERSION) {
+            commands_printf("Pair %d: Magic=OK VERSION INVALID (%d)", pair, ver);
+            continue;
+        }
+
+        uint16_t expected_crc =
+            (uint16_t)block[XESC2_OTP_OFFS_CRC] |
+            ((uint16_t)block[XESC2_OTP_OFFS_CRC + 1] << 8);
+        uint16_t actual_crc = otp_crc16(block + XESC2_OTP_CRC_DATA_OFFS,
+                                        XESC2_OTP_CRC_DATA_LEN);
+        const char *crc_ok = (expected_crc == actual_crc) ? "OK" : "FAIL";
+
+        uint8_t type_id = block[XESC2_OTP_OFFS_TYPE_ID];
+        uint8_t variant_id = block[XESC2_OTP_OFFS_VARIANT];
+        uint8_t hw_maj = block[XESC2_OTP_OFFS_HW_MAJOR];
+        uint8_t hw_min = block[XESC2_OTP_OFFS_HW_MINOR];
+        uint8_t hw_pat = block[XESC2_OTP_OFFS_HW_PATCH];
+        uint16_t serial = (uint16_t)block[XESC2_OTP_OFFS_SERIAL] |
+                          ((uint16_t)block[XESC2_OTP_OFFS_SERIAL + 1] << 8);
+        uint32_t ts = (uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP] |
+                      ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 1] << 8) |
+                      ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 2] << 16) |
+                      ((uint32_t)block[XESC2_OTP_OFFS_TIMESTAMP + 3] << 24);
+
+        commands_printf("Pair %d: Magic=0x%02X Ver=%d Type=%d Var=%d "
+                        "HW=%d.%d.%d Serial=%u Timestamp=%u CRC=%s",
+                        pair, magic, ver, type_id, variant_id,
+                        hw_maj, hw_min, hw_pat, serial, (unsigned int)ts, crc_ok);
+
+        if (expected_crc == actual_crc) {
+            found++;
+        }
+    }
+
+    commands_printf(" ");
+    if (found > 0) {
+        commands_printf("Active identity: Type=%d Variant=%d HW=%d.%d.%d Serial=%u",
+                        g_xesc2_otp_identity.type_id, g_xesc2_otp_identity.variant_id,
+                        g_xesc2_otp_identity.hw_major, g_xesc2_otp_identity.hw_minor,
+                        g_xesc2_otp_identity.hw_patch, g_xesc2_otp_identity.serial);
+    } else {
+        commands_printf("No valid OTP identity found, using defaults.");
+    }
+    commands_printf(" ");
+}
+
+// ------------------------------------------------------------------
+// Helper: print OTP identity info (used by hw_status)
+// ------------------------------------------------------------------
+void xesc2_print_hw_status_otp_info(void) {
+    commands_printf("OTP detected: %s", g_xesc2_otp_identity.valid ? "Yes" : "No");
+
+    if (g_xesc2_otp_identity.valid) {
+        // Type name
+        const char *type_name = "Unknown";
+        if (g_xesc2_otp_identity.type_id == XESC2_TYPE_MINI) {
+            type_name = "xESC2 Mini";
+        } else if (g_xesc2_otp_identity.type_id == XESC2_TYPE_LITE) {
+            type_name = "xESC2 Lite";
+        }
+        commands_printf("OTP Board Type: %s (ID %d)", type_name, g_xesc2_otp_identity.type_id);
+
+        // Variant name
+        const char *variant_name = "Unknown";
+        if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V1_STD) {
+            variant_name = "V1 Standard";
+        } else if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V2_STD) {
+            variant_name = "V2 Standard";
+        } else if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V2_POWER) {
+            variant_name = "V2 Power";
+        }
+        commands_printf("OTP Variant: %s (ID %d)", variant_name, g_xesc2_otp_identity.variant_id);
+
+        commands_printf("OTP HW Version: %d.%d.%d",
+                        g_xesc2_otp_identity.hw_major,
+                        g_xesc2_otp_identity.hw_minor,
+                        g_xesc2_otp_identity.hw_patch);
+
+        commands_printf("OTP Serial: %u", g_xesc2_otp_identity.serial);
+
+        if (g_xesc2_otp_identity.timestamp > 0) {
+            // Convert Unix timestamp to YYYY-MM-DD HH:MM:SS (UTC)
+            // Simple algorithm without <time.h> dependency
+            uint32_t ts = g_xesc2_otp_identity.timestamp;
+            uint32_t days = ts / 86400;
+            uint32_t secs = ts % 86400;
+            uint32_t h = secs / 3600;
+            uint32_t m = (secs % 3600) / 60;
+            uint32_t s = secs % 60;
+
+            // Day calculation starting from 1970-01-01
+            uint32_t y = 1970;
+            while (1) {
+                uint32_t days_in_year = ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 366 : 365;
+                if (days < days_in_year) break;
+                days -= days_in_year;
+                y++;
+            }
+
+            // Days per month (non-leap year)
+            static const uint8_t month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+            uint8_t leap = ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 1 : 0;
+            uint32_t mo = 0;
+            while (mo < 12) {
+                uint32_t md = month_days[mo];
+                if (mo == 1) md += leap;
+                if (days < md) break;
+                days -= md;
+                mo++;
+            }
+            uint32_t d = days + 1;
+            mo += 1;
+
+            commands_printf("OTP Timestamp: %u (%04u-%02u-%02u %02u:%02u:%02u UTC)",
+                           (unsigned int)ts, y, mo, d, h, m, s);
+        } else {
+            commands_printf("OTP Timestamp: N/A");
+        }
+    }
+
+    // Additional HW info from variant config
+    if (g_xesc2_variant) {
+        commands_printf("Current Amp Gain: %.3f", (double)g_xesc2_variant->current_amp_gain);
+        commands_printf("Current Shunt Res: %.4f mOhm",
+                        (double)(g_xesc2_variant->current_shunt_res * 1000.0));
     }
 }

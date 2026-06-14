@@ -38,6 +38,7 @@
 #include "mempools.h"
 #include "crc.h"
 #include "firmware_metadata.h"
+#include "xesc2_variant_config.h"
 
 #include <string.h>
 #include <ctype.h>
@@ -601,6 +602,10 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 				STM32_UUID_8[0], STM32_UUID_8[1], STM32_UUID_8[2], STM32_UUID_8[3],
 				STM32_UUID_8[4], STM32_UUID_8[5], STM32_UUID_8[6], STM32_UUID_8[7],
 				STM32_UUID_8[8], STM32_UUID_8[9], STM32_UUID_8[10], STM32_UUID_8[11]);
+
+		// OTP / board identity information
+		xesc2_print_hw_status_otp_info();
+
 		commands_printf("Permanent NRF found: %s", conf_general_permanent_nrf_found ? "Yes" : "No");
 #ifdef HW_HAS_PHASE_SHUNTS
 		commands_printf("Phase Shunts: Yes");
@@ -1141,6 +1146,8 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 				commands_printf("Invalid arguments\n");
 			}
 		}
+	} else if (strcmp(argv[0], "otp_info") == 0) {
+		xesc2_terminal_otp_info(argc, (const char**)argv);
 	} else if (strcmp(argv[0], "fw_info") == 0) {
 		commands_printf("Git Branch: %s", GIT_BRANCH_NAME);
 		commands_printf("Git Hash  : %s", GIT_COMMIT_HASH);
@@ -1269,6 +1276,9 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 
 		commands_printf("fw_info");
 		commands_printf("  Print detailed firmware info.");
+
+		commands_printf("otp_info");
+		commands_printf("  Scan OTP memory and display stored board identities.");
 
 		commands_printf("rebootwdt");
 		commands_printf("  Reboot using the watchdog timer.");
