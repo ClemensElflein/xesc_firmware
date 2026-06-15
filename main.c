@@ -277,6 +277,20 @@ int main(void) {
 	LED_RED_OFF();
 	LED_GREEN_OFF();
 
+	// If OTP is present but corrupted (e.g. overwritten = wrong CRC),
+	// do NOT start the motor. Wrong shunt/phase values could destroy hardware.
+	if (g_xesc2_variant == 0) {
+		while (1) {
+			for (int i = 0; i < 2; i++) {
+				chThdSleepMilliseconds(100);
+				LED_RED_ON();
+				chThdSleepMilliseconds(100);
+				LED_RED_OFF();
+			}
+			chThdSleepMilliseconds(1000);
+		}
+	}
+
 	conf_general_init();
 
 	if (flash_helper_verify_flash_memory() == FAULT_CODE_FLASH_CORRUPTION)	{

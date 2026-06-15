@@ -67,9 +67,14 @@ extern const xesc2_variant_config_t *g_xesc2_variant;
 // Global OTP identity, populated at startup
 extern xesc2_otp_identity_t g_xesc2_otp_identity;
 
-// Function declarations
+#include <stdbool.h>
+
+bool xesc2_has_otp_data(void);
+xesc2_otp_identity_t xesc2_get_otp_identity(void);
+
 const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t variant_id);
 void xesc2_detect_and_apply_variant(void);
+
 void xesc2_terminal_otp_info(int argc, const char **argv);
 void xesc2_print_hw_status_otp_info(void);
 

@@ -65,7 +65,28 @@ static const uint8_t *otp_read_block(uint8_t pair_index)
     return (const uint8_t *)(XESC2_OTP_BASE_ADDR + pair_index * 2 * XESC2_OTP_BLOCK_SIZE);
 }
 
-static xesc2_otp_identity_t otp_scan(void)
+// ------------------------------------------------------------------
+// Public: check if any OTP data exists (any pair has magic byte)
+// ------------------------------------------------------------------
+bool xesc2_has_otp_data(void)
+{
+    for (int pair = 0; pair < XESC2_OTP_NUM_PAIRS; pair++)
+    {
+        const uint8_t *block = otp_read_block(pair);
+        if (block[XESC2_OTP_OFFS_MAGIC] == XESC2_OTP_MAGIC)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ------------------------------------------------------------------
+// Public: find the last valid OTP identity (scans from highest
+// pair index downward — last pair with valid magic+version+CRC wins)
+// Returns identity with valid=0 if no valid record found.
+// ------------------------------------------------------------------
+xesc2_otp_identity_t xesc2_get_otp_identity(void)
 {
     xesc2_otp_identity_t id = {0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -194,13 +215,17 @@ const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t 
 }
 
 void xesc2_detect_and_apply_variant(void) {
-    xesc2_otp_identity_t id = otp_scan();
+    xesc2_otp_identity_t id = xesc2_get_otp_identity();
 
     // Store the full identity for later use (hw_status, otp_info, etc.)
     g_xesc2_otp_identity = id;
 
     if (id.valid) {
         g_xesc2_variant = xesc2_get_variant_config(id.type_id, id.variant_id);
+    } else if (xesc2_has_otp_data()) {
+        // OTP data exists but CRC is corrupt (e.g. overwritten) —
+        // do NOT start the motor with wrong shunt/phase values!
+        // g_xesc2_variant stays NULL; main.c will lock with LED blinking.
     } else {
         // No valid OTP found — fall back to Mini Standard
         g_xesc2_variant = xesc2_get_variant_config(XESC2_TYPE_MINI, XESC2_VARIANT_V1_STD);
@@ -279,9 +304,11 @@ void xesc2_terminal_otp_info(int argc, const char **argv) {
 // Helper: print OTP identity info (used by hw_status)
 // ------------------------------------------------------------------
 void xesc2_print_hw_status_otp_info(void) {
-    commands_printf("OTP detected: %s", g_xesc2_otp_identity.valid ? "Yes" : "No");
-
-    if (g_xesc2_otp_identity.valid) {
+    if (!xesc2_has_otp_data()) {
+        commands_printf("OTP detected: No");
+    } else if (!g_xesc2_otp_identity.valid) {
+        commands_printf("Invalid OTP detected (CRC mismatch)");
+    } else {
         // Type name
         const char *type_name = "Unknown";
         if (g_xesc2_otp_identity.type_id == XESC2_TYPE_MINI) {
