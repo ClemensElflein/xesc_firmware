@@ -20,6 +20,8 @@
 #ifndef HW_XESC2_H_
 #define HW_XESC2_H_
 
+#define HAS_OTP
+
 #include "xesc2_variant_config.h"
 
 bool tmc_error(void);

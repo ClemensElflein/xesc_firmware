@@ -626,7 +626,10 @@ static void handle_get_node_info(CanardInstance* ins, CanardRxTransfer* transfer
 	pkt.hardware_version.minor = 0;
 #endif
 
-	const char *hw_name = g_xesc2_variant->hw_name;
+	// HW_NAME is a static string on most boards; on xESC2 it resolves to the
+	// runtime-detected variant name (g_xesc2_variant->hw_name), which is always
+	// valid because invalid configs fall back to variant_error_fallback.
+	const char *hw_name = HW_NAME;
 	char name[strlen("org.vesc.") + strlen(hw_name) + 1];
 	strcpy(name, "org.vesc.");
 	strcat(name, hw_name);

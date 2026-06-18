@@ -28,9 +28,6 @@
 #include "hw_xesc2_mini.h"
 #include <time.h>
 
-// Global pointer to the active variant configuration
-const xesc2_variant_config_t *g_xesc2_variant = 0;
-
 // Global OTP identity, populated at startup
 xesc2_otp_identity_t g_xesc2_otp_identity = {0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -250,6 +247,10 @@ static const xesc2_variant_config_t variant_error_fallback = {
 
 // -- Lite type (XESC2_TYPE_LITE) —
 // TODO: Add lite variants if usefull to integrated here
+
+// Global pointer to the active variant configuration
+const xesc2_variant_config_t *g_xesc2_variant = &variant_error_fallback;
+
 
 // ------------------------------------------------------------------
 // Public API

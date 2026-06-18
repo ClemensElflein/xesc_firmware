@@ -270,8 +270,11 @@ int main(void) {
 	events_init();
 	timer_init(); // Initialize timer here to allow I2C in hw_init
 
+#ifdef HAS_OTP
 	// Detect and apply hardware variant before driver init
 	xesc2_detect_and_apply_variant();
+#endif
+
 
 	hw_init_gpio();
 	LED_RED_OFF();
@@ -290,6 +293,21 @@ int main(void) {
 	}
 
 	ledpwm_init();
+
+#ifdef HAS_OTP
+	// No valid hardware variant could be detected (e.g. v2 board without valid
+	// OTP, or invalid/corrupt OTP). The variant has fallen back to safe
+	// zero-current limits, but to be certain the motor can never spin with
+	// wrong shunt/phase values (could destroy hardware or injure people), latch
+	// a non-clearing fault BEFORE mc_interface_init(). This makes
+	// mc_interface_init() skip the PWM peripheral setup entirely, so the gate
+	// driver can never be armed, and permanently disables motor control. Comms
+	// still come up below, so the VESC tool can connect and display the fault.
+	if (g_xesc2_fatal_config_error) {
+		mc_interface_set_persistent_fault(FAULT_CODE_FLASH_CORRUPTION_MC_CFG);
+	}
+#endif
+
 	mc_interface_init();
 
 	commands_init();

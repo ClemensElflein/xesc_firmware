@@ -38,7 +38,13 @@ static const I2CConfig i2cfg = {
 };
 
 bool tmc_error() {
-    return !tmc6200_ok() || palReadPad(GPIOB, 7) || g_xesc2_fatal_config_error;
+    // Report only real TMC6200 gate-driver faults here. An invalid hardware
+    // configuration is handled separately and far more strictly in main.c via
+    // mc_interface_set_persistent_fault(): the PWM peripheral is never even
+    // initialized in that case, so the motor cannot spin. Folding the config
+    // error into a fake DRV fault here was misleading (wrong fault code) and
+    // weaker (a DRV fault still allows PWM init and can be cleared).
+    return !tmc6200_ok() || palReadPad(GPIOB, 7);
 }
 
 void hw_init_gpio(void) {

@@ -142,6 +142,10 @@ typedef struct {
 
 static volatile fault_data_local m_fault_data = {0, FAULT_CODE_NONE, 0, 0, {0, 0}};
 
+// Non-clearing fault that permanently disables motor control (e.g. invalid
+// hardware configuration at startup). Set via mc_interface_set_persistent_fault().
+static volatile mc_fault_code m_persistent_fault = FAULT_CODE_NONE;
+
 // Private functions
 static void update_override_limits(volatile motor_if_state_t *motor, volatile mc_configuration *conf);
 static void run_timer_tasks(volatile motor_if_state_t *motor);
@@ -232,23 +236,29 @@ void mc_interface_init(void) {
 
 	encoder_init(&motor_now()->m_conf);
 
-	// Initialize selected implementation
-	switch (motor_now()->m_conf.motor_type) {
-	case MOTOR_TYPE_BLDC:
-	case MOTOR_TYPE_DC:
-		mcpwm_init(&motor_now()->m_conf);
-		break;
+	// Initialize selected implementation, unless a persistent fault is latched
+	// (e.g. invalid hardware configuration). In that case the PWM peripheral is
+	// deliberately left uninitialized so the gate driver can never be driven:
+	// mcpwm_foc_init_done()/mcpwm_init_done() stay false, which makes
+	// mc_interface_try_input() reject every motor command unconditionally.
+	if (m_persistent_fault == FAULT_CODE_NONE) {
+		switch (motor_now()->m_conf.motor_type) {
+		case MOTOR_TYPE_BLDC:
+		case MOTOR_TYPE_DC:
+			mcpwm_init(&motor_now()->m_conf);
+			break;
 
-	case MOTOR_TYPE_FOC:
+		case MOTOR_TYPE_FOC:
 #ifdef HW_HAS_DUAL_MOTORS
-		mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_2.m_conf);
+			mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_2.m_conf);
 #else
-		mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_1.m_conf);
+			mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_1.m_conf);
 #endif
-		break;
+			break;
 
-	default:
-		break;
+		default:
+			break;
+		}
 	}
 
 	bms_init((bms_config*)&m_motor_1.m_conf.bms);
@@ -367,22 +377,28 @@ void mc_interface_set_configuration(mc_configuration *configuration) {
 
 		motor->m_conf = *configuration;
 
-		switch (motor->m_conf.motor_type) {
-		case MOTOR_TYPE_BLDC:
-		case MOTOR_TYPE_DC:
-			mcpwm_init(&motor->m_conf);
-			break;
+		// Do not (re)initialize the PWM peripheral while a persistent fault is
+		// latched. A config write from the VESC tool must never be able to arm
+		// the gate driver on a board with invalid hardware configuration; it
+		// stays disabled until reboot with a valid configuration.
+		if (m_persistent_fault == FAULT_CODE_NONE) {
+			switch (motor->m_conf.motor_type) {
+			case MOTOR_TYPE_BLDC:
+			case MOTOR_TYPE_DC:
+				mcpwm_init(&motor->m_conf);
+				break;
 
-		case MOTOR_TYPE_FOC:
+			case MOTOR_TYPE_FOC:
 #ifdef HW_HAS_DUAL_MOTORS
-			mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_2.m_conf);
+				mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_2.m_conf);
 #else
-			mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_1.m_conf);
+				mcpwm_foc_init((mc_configuration*)&m_motor_1.m_conf, (mc_configuration*)&m_motor_1.m_conf);
 #endif
-			break;
+				break;
 
-		default:
-			break;
+			default:
+				break;
+			}
 		}
 	} else {
 		motor->m_conf = *configuration;
@@ -469,7 +485,31 @@ void mc_interface_lock_override_once(void) {
 }
 
 mc_fault_code mc_interface_get_fault(void) {
+	// A persistent fault (e.g. invalid hardware configuration detected at
+	// startup) overrides everything. It never auto-clears, so the VESC tool
+	// keeps showing the error and the motor stays disabled until reboot with
+	// a valid configuration. See mc_interface_set_persistent_fault().
+	if (m_persistent_fault != FAULT_CODE_NONE) {
+		return m_persistent_fault;
+	}
+
 	return motor_now()->m_fault_now;
+}
+
+/**
+ * Latch a non-clearing fault that permanently disables motor control.
+ *
+ * Unlike mc_interface_fault_stop(), this fault is never cleared by the
+ * timer ISR. It is reported through mc_interface_get_fault() (so the VESC
+ * tool can connect and display it) and hard-gates mc_interface_try_input()
+ * so PWM can never start - not even via mc_interface_lock_override_once().
+ *
+ * Intended for unrecoverable startup conditions such as a corrupt or invalid
+ * hardware configuration, where running with wrong shunt/phase values could
+ * destroy hardware or injure people.
+ */
+void mc_interface_set_persistent_fault(mc_fault_code fault) {
+	m_persistent_fault = fault;
 }
 
 const char* mc_interface_fault_to_string(mc_fault_code fault) {
@@ -1799,6 +1839,13 @@ void mc_interface_override_temp_motor(float temp) {
  *
  */
 int mc_interface_try_input(void) {
+	// Hard safety gate: a latched persistent fault blocks all motor control
+	// unconditionally. Placed before the lock-override logic so it can never
+	// be bypassed (not even by mc_interface_lock_override_once()).
+	if (m_persistent_fault != FAULT_CODE_NONE) {
+		return 1;
+	}
+
 	// TODO: Remove this later
 	if (mc_interface_get_state() == MC_STATE_DETECTING) {
 		mcpwm_stop_pwm();
