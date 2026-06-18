@@ -28,7 +28,7 @@ func main() {
 		verifyPub = flag.String("verify-pub", "", "Verify BLS signature in OTP_BLOCKS.BIN using public key PUBKEY")
 		read      = flag.Int("read", -1, "Read OTP pair N from device and display decoded info")
 		boardType = flag.String("type", "", "Board type (mini, lite)")
-		variant   = flag.String("variant", "", "Variation (v1_std, v2_power)")
+		variant   = flag.String("variant", "", "Variation (v1_std, v2_std, v2_pwr)")
 		hw        = flag.String("hw", "", "HW version (e.g. 2.0.1)")
 		keyFile   = flag.String("key", "", "Private key file for signing (32 bytes)")
 		output    = flag.String("output", "otp_blocks.bin", "Output binary file")

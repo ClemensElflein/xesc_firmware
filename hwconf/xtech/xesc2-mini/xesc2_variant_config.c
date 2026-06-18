@@ -145,21 +145,20 @@ xesc2_otp_identity_t xesc2_get_otp_identity(void)
     return id;
 }
 
-// ------------------------------------------------------------------
-// Variant configuration tables (indexed by type_id, variant_id)
-// ------------------------------------------------------------------
+// ----------------------------
+// Variant configuration tables
+// ----------------------------
 
-// -- Mini type (XESC2_TYPE_MINI) --
+// -- Old v1.x mini
 static const xesc2_variant_config_t variant_mini_v1_standard = {
     .type_id = XESC2_TYPE_MINI,
-    .variant_id = XESC2_VARIANT_V1_STD,
-    // Do not use spaces in hw_name — it becomes part of the UAVCAN node name
+    .variant_id = XESC2_VARIANT_V1_STD,  // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
     .hw_name = "xESC2-mini_v1",
     .current_amp_gain = (5.0f * 0.595f), // 5x gain * voltage divider ratio
     .current_shunt_res = 0.033f,
     .get_current_scale = 1.11f,
     .tmc6200_amp_gain = 5,
-    .tmc6200_drvstrength = 2, // medium (default)
+    .tmc6200_drvstrength = 2,            // medium (default)
     .lim_current_min = -15.0f,
     .lim_current_max = 15.0f,
     .lim_current_in_min = -10.0f,
@@ -175,16 +174,40 @@ static const xesc2_variant_config_t variant_mini_v1_standard = {
     .mcconf_l_in_current_min = -2.0f,
 };
 
+// -- New v2.x mini
+static const xesc2_variant_config_t variant_mini_v2_standard = {
+    .type_id = XESC2_TYPE_MINI,
+    .variant_id = XESC2_VARIANT_V2_STD,
+    .hw_name = "xESC2-mini_v2",   // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
+    .current_amp_gain = 5.0f,
+    .current_shunt_res = 0.025f,
+    .get_current_scale = 0.935f,
+    .tmc6200_amp_gain = 5,        // 5x (10x would saturate at 13.2A)
+    .tmc6200_drvstrength = 2,     // medium
+    .lim_current_min = -15.0f,    // FET derated ~14-15A at 90°C
+    .lim_current_max = 15.0f,
+    .lim_current_in_min = -10.0f,
+    .lim_current_in_max = 10.0f,
+    .lim_current_abs_max = 20.0f, // 25mΩ handles 33% more than 33mΩ v1
+    .lim_vin_min = 6.0f,
+    .lim_vin_max = 57.0f,
+    .lim_temp_fet_max = 90.0f,
+    .l_max_abs_current = 20.0f,
+    .mcconf_l_current_max = 6.0f,
+    .mcconf_l_current_min = -6.0f,
+    .mcconf_l_in_current_max = 2.0f,
+    .mcconf_l_in_current_min = -2.0f,
+};
+
 static const xesc2_variant_config_t variant_mini_v2_power = {
     .type_id = XESC2_TYPE_MINI,
-    .variant_id = XESC2_VARIANT_V2_POWER,
-    // Do not use spaces in hw_name — it becomes part of the UAVCAN node name
-    .hw_name = "xESC2-power_v2",
+    .variant_id = XESC2_VARIANT_V2_PWR,
+    .hw_name = "xESC2-power_v2", // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
     .current_amp_gain = 10.0f,
     .current_shunt_res = 0.003f,
     .get_current_scale = 0.935f,
     .tmc6200_amp_gain = 10,
-    .tmc6200_drvstrength = 3, // strong for BSC0702LS (1300pF Ciss) at VIO=3.3V
+    .tmc6200_drvstrength = 3,    // strong for BSC0702LS (1300pF Ciss) at VIO=3.3V
     .lim_current_min = -25.0f,
     .lim_current_max = 25.0f,
     .lim_current_in_min = -8.0f,
@@ -203,8 +226,8 @@ static const xesc2_variant_config_t variant_mini_v2_power = {
 // Error fallback (no runtime state, only used when config/OTP is invalid
 static const xesc2_variant_config_t variant_error_fallback = {
     .type_id = XESC2_TYPE_MINI,
-    .variant_id = 0xFF, // marker for invalid/missing config
-    .hw_name = "xESC2_OTP-ERROR",
+    .variant_id = 0xFF,           // marker for invalid/missing config
+    .hw_name = "xESC2_OTP-ERROR", // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
     .current_amp_gain = 1.0f,
     .current_shunt_res = 0.033f,
     .get_current_scale = 1.0f,
@@ -233,17 +256,25 @@ static const xesc2_variant_config_t variant_error_fallback = {
 // ------------------------------------------------------------------
 
 const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t variant_id) {
-    if (type_id == XESC2_TYPE_MINI) {
-        if (variant_id == XESC2_VARIANT_V1_STD) {
-            return &variant_mini_v1_standard;
-        }
-        if (variant_id == XESC2_VARIANT_V2_POWER) {
-            return &variant_mini_v2_power;
-        }
+    switch (type_id) {
+        case XESC2_TYPE_MINI:
+            switch (variant_id) {
+                case XESC2_VARIANT_V1_STD:
+                    return &variant_mini_v1_standard;
+                case XESC2_VARIANT_V2_STD:
+                    return &variant_mini_v2_standard;
+                case XESC2_VARIANT_V2_PWR:
+                    return &variant_mini_v2_power;
+            }
+            break;
+        case XESC2_TYPE_LITE:
+            // No lite variants defined yet
+            break;
     }
 
-    // Unknown combination — fall back to Mini Standard as safe default
-    return &variant_mini_v1_standard;
+    // Unknown combination
+    g_xesc2_fatal_config_error = true;
+    return &variant_error_fallback;
 }
 
 void xesc2_detect_and_apply_variant(void) {
@@ -368,7 +399,7 @@ void xesc2_print_hw_status_otp_info(void) {
             variant_name = "V1 Standard";
         } else if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V2_STD) {
             variant_name = "V2 Standard";
-        } else if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V2_POWER) {
+        } else if (g_xesc2_otp_identity.variant_id == XESC2_VARIANT_V2_PWR) {
             variant_name = "V2 Power";
         }
         commands_printf("OTP Variant: %s (ID %d)", variant_name, g_xesc2_otp_identity.variant_id);

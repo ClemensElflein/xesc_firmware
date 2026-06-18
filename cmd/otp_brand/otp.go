@@ -42,8 +42,9 @@ var typeMap = map[string]uint8{
 	"lite": uint8(C.XESC2_TYPE_LITE),
 }
 var variantMap = map[string]uint8{
-	"v1_std":   uint8(C.XESC2_VARIANT_V1_STD),
-	"v2_power": uint8(C.XESC2_VARIANT_V2_POWER),
+	"v1_std": uint8(C.XESC2_VARIANT_V1_STD),
+	"v2_std": uint8(C.XESC2_VARIANT_V2_STD),
+	"v2_pwr": uint8(C.XESC2_VARIANT_V2_PWR),
 }
 
 // buildDataBlock constructs a 32-byte OTP data block (magic .. CRC16).

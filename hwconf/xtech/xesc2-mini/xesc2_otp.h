@@ -92,7 +92,7 @@
 
 // Variant IDs
 #define XESC2_VARIANT_V1_STD 0
-#define XESC2_VARIANT_V2_STD 1 // Not yet produced, reserved for future use
-#define XESC2_VARIANT_V2_POWER 2
+#define XESC2_VARIANT_V2_STD 1 // v2 Standard (25mΩ shunt, YJG20N06A FETs)
+#define XESC2_VARIANT_V2_PWR 2 // v2 Power (3mΩ shunt, BSC0702LS FETs)
 
 #endif /* XESC2_OTP_H_ */

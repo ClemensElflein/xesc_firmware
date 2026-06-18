@@ -165,7 +165,7 @@ go build -o otp_brand .
 # -> ~/.config/xesc/keys/builder1.key.pub  (public key, 96 bytes hex)
 
 # 2. Sign an OTP identity block
-./otp_brand --type mini --variant v2_power --hw 2.0.1 \
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
     --key ~/.config/xesc/keys/builder1.key --output otp_blocks.bin
 
 # 3. Verify the signature before flashing
@@ -174,7 +174,7 @@ go build -o otp_brand .
 ./otp_brand --verify-pub otp_blocks.bin --key ~/.config/xesc/keys/builder1.key.pub
 
 # 4. Flash OTP to the device (uses STM32CubeProgrammer)
-./otp_brand --type mini --variant v2_power --hw 2.0.1 \
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
     --key ~/.config/xesc/keys/builder1.key --flash
 ```
 
@@ -183,7 +183,7 @@ STM32CubeProgrammer discovery order: `$ST_PROGRAMMER_PATH` → `/usr/local/STMic
 | Flag             | Values / Description                                     |
 | ---------------- | -------------------------------------------------------- |
 | `--type`         | `mini`, `lite`                                           |
-| `--variant`      | `v1_std`, `v2_power`                                     |
+| `--variant`      | `v1_std`, `v2_std`, `v2_pwr`                                     |
 | `--hw`           | `"2.0.1"` (`MAJOR.MINOR.PATCH`)                          |
 | `--key`          | Private key path (32 bytes), or public key for `--verify-pub` |
 | `--output`       | Output `.bin` path (default: `otp_blocks.bin`)           |
