@@ -18,11 +18,14 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
+#include "ch.h"
+#include "hal.h"
 #include "xesc2_variant_config.h"
 #include "crc.h"
 #include "xesc2_otp.h"
 #include "commands.h"
 #include "terminal.h"
+#include "hw_xesc2_mini.h"
 #include <time.h>
 
 // Global pointer to the active variant configuration
@@ -30,6 +33,10 @@ const xesc2_variant_config_t *g_xesc2_variant = 0;
 
 // Global OTP identity, populated at startup
 xesc2_otp_identity_t g_xesc2_otp_identity = {0, 0, 0, 0, 0, 0, 0, 0};
+
+// Fatal config error flag: set when OTP is missing on v2 or corrupt.
+// Causes tmc_error() to report permanent fault, blocking motor start.
+bool g_xesc2_fatal_config_error = false;
 
 // ------------------------------------------------------------------
 // CRC-16/CCITT-FALSE verification
@@ -193,6 +200,31 @@ static const xesc2_variant_config_t variant_mini_v2_power = {
     .mcconf_l_in_current_min = -8.0f,
 };
 
+// Error fallback (no runtime state, only used when config/OTP is invalid
+static const xesc2_variant_config_t variant_error_fallback = {
+    .type_id = XESC2_TYPE_MINI,
+    .variant_id = 0xFF, // marker for invalid/missing config
+    .hw_name = "xESC2-NoOTP",
+    .current_amp_gain = 1.0f,
+    .current_shunt_res = 0.033f,
+    .get_current_scale = 1.0f,
+    .tmc6200_amp_gain = 1,
+    .tmc6200_drvstrength = 2,
+    .lim_current_min = 0.0f,
+    .lim_current_max = 0.0f,
+    .lim_current_in_min = 0.0f,
+    .lim_current_in_max = 0.0f,
+    .lim_current_abs_max = 0.0f,
+    .lim_vin_min = 6.0f,
+    .lim_vin_max = 57.0f,
+    .lim_temp_fet_max = 90.0f,
+    .l_max_abs_current = 0.0f,
+    .mcconf_l_current_max = 0.0f,
+    .mcconf_l_current_min = 0.0f,
+    .mcconf_l_in_current_max = 0.0f,
+    .mcconf_l_in_current_min = 0.0f,
+};
+
 // -- Lite type (XESC2_TYPE_LITE) —
 // TODO: Add lite variants if usefull to integrated here
 
@@ -215,21 +247,33 @@ const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t 
 }
 
 void xesc2_detect_and_apply_variant(void) {
+    // Configure V2 identification pin: LOW = v2 board (requires OTP),
+    // HIGH/open = v1 board (no OTP needed, but allowed)
+    palSetPadMode(HW_V2_ID_GPIO, HW_V2_ID_PIN, PAL_MODE_INPUT_PULLUP);
+    bool is_v2 = (palReadPad(HW_V2_ID_GPIO, HW_V2_ID_PIN) == 0);
+
     xesc2_otp_identity_t id = xesc2_get_otp_identity();
 
     // Store the full identity for later use (hw_status, otp_info, etc.)
     g_xesc2_otp_identity = id;
 
     if (id.valid) {
+        // Valid OTP found, all fine
         g_xesc2_variant = xesc2_get_variant_config(id.type_id, id.variant_id);
-    } else if (xesc2_has_otp_data()) {
-        // OTP data exists but CRC is corrupt (e.g. overwritten) —
-        // do NOT start the motor with wrong shunt/phase values!
-        // g_xesc2_variant stays NULL; main.c will lock with LED blinking.
-    } else {
-        // No valid OTP found — fall back to Mini Standard
-        g_xesc2_variant = xesc2_get_variant_config(XESC2_TYPE_MINI, XESC2_VARIANT_V1_STD);
+        return;
     }
+    
+    if (!xesc2_has_otp_data() && !is_v2) {
+        // v1 board without OTP => v1-mini standard config
+        g_xesc2_variant = xesc2_get_variant_config(XESC2_TYPE_MINI, XESC2_VARIANT_V1_STD);
+        return;
+    }
+
+    // All other cases are errors eg:
+    // - v2 board without valid OTP
+    // - v1 board with invalid OTP (eg CRC mismatch)
+    g_xesc2_variant = &variant_error_fallback;
+    g_xesc2_fatal_config_error = true;
 }
 
 // ------------------------------------------------------------------

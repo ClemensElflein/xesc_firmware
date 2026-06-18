@@ -22,6 +22,7 @@
 #define XESC2_VARIANT_CONFIG_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 // Note: Type and variant IDs are defined in xesc2_otp.h
 
@@ -67,7 +68,9 @@ extern const xesc2_variant_config_t *g_xesc2_variant;
 // Global OTP identity, populated at startup
 extern xesc2_otp_identity_t g_xesc2_otp_identity;
 
-#include <stdbool.h>
+// Fatal config error flag: set when OTP is missing on v2 or corrupt.
+// Causes tmc_error() to report permanent fault, blocking motor start.
+extern bool g_xesc2_fatal_config_error;
 
 bool xesc2_has_otp_data(void);
 xesc2_otp_identity_t xesc2_get_otp_identity(void);

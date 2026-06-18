@@ -38,7 +38,7 @@ static const I2CConfig i2cfg = {
 };
 
 bool tmc_error() {
-    return !tmc6200_ok() || palReadPad(GPIOB, 7);
+    return !tmc6200_ok() || palReadPad(GPIOB, 7) || g_xesc2_fatal_config_error;
 }
 
 void hw_init_gpio(void) {

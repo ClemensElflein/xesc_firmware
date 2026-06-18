@@ -173,6 +173,10 @@ void tmc6200_reset_faults(void);
 #define HW_I2C_SDA_PORT GPIOB
 #define HW_I2C_SDA_PIN 11
 
+// V2 identification pin: LOW = v2 board (requires OTP), HIGH/open = v1 board (no OTP needed, but allowed)
+#define HW_V2_ID_GPIO    GPIOD
+#define HW_V2_ID_PIN     2
+
 // Hall/encoder pins
 #define HW_HALL_ENC_GPIO1 GPIOC
 #define HW_HALL_ENC_PIN1 6
