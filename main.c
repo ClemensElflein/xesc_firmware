@@ -275,7 +275,6 @@ int main(void) {
 	xesc2_detect_and_apply_variant();
 #endif
 
-
 	hw_init_gpio();
 	LED_RED_OFF();
 	LED_GREEN_OFF();
