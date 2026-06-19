@@ -18,6 +18,14 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
+#include "conf_general.h"
+
+// This file lives in the shared HWSRC list, so it is compiled for every board.
+// All of its functionality is xESC2-OTP specific, so guard the entire
+// implementation on HAS_OTP (defined only by the xESC2 hardware header). On any
+// other board this becomes an empty translation unit.
+#ifdef HAS_OTP
+
 #include "ch.h"
 #include "hal.h"
 #include "xesc2_variant_config.h"
@@ -459,3 +467,5 @@ void xesc2_print_hw_status_otp_info(void) {
                         (double)(g_xesc2_variant->current_shunt_res * 1000.0));
     }
 }
+
+#endif // HAS_OTP
