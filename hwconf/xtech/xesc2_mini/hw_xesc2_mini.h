@@ -226,8 +226,11 @@ void hw_xesc2_reset_drv_faults(void);
 // SPI pins
 #define HW_SPI_DEV				SPID1
 #define HW_SPI_GPIO_AF			GPIO_AF_SPI1
-#define HW_SPI_PORT_NSS			GPIOA
-#define HW_SPI_PIN_NSS			4
+// NSS on PC13: avoids GPIOA4 (DRV8376 ILIMIT on lite). PC13 is a VBAT-domain
+// pin (low speed/drive), fine for a slow chip-select. Only used when an SPI
+// encoder / external NRF is configured.
+#define HW_SPI_PORT_NSS			GPIOC
+#define HW_SPI_PIN_NSS			13
 #define HW_SPI_PORT_SCK			GPIOA
 #define HW_SPI_PIN_SCK			5
 #define HW_SPI_PORT_MOSI		GPIOA
@@ -290,6 +293,11 @@ void hw_xesc2_reset_drv_faults(void);
 #define MCCONF_L_CURRENT_MIN			(g_xesc2_variant->mcconf_l_current_min)
 #define MCCONF_L_IN_CURRENT_MAX			(g_xesc2_variant->mcconf_l_in_current_max)
 #define MCCONF_L_IN_CURRENT_MIN			(g_xesc2_variant->mcconf_l_in_current_min)
+
+// Current-unbalance fault threshold. Per-variant multiplier of FAC_CURRENT (raw
+// ADC unbalance count); overrides the firmware default in hw.h. Lite uses a
+// higher value (noisier low-side sensing) than mini/power.
+#define MCCONF_MAX_CURRENT_UNBALANCE	(FAC_CURRENT * g_xesc2_variant->mcconf_max_current_unbalance)
 
 #define APPCONF_IMU_TYPE					IMU_TYPE_OFF
 

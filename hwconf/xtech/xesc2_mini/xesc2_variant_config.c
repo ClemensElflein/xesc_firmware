@@ -40,7 +40,8 @@
 xesc2_otp_identity_t g_xesc2_otp_identity = {0, 0, 0, 0, 0, 0, 0, 0};
 
 // Fatal config error flag: set when OTP is missing on v2 or corrupt.
-// Causes tmc_error() to report permanent fault, blocking motor start.
+// main() latches a persistent fault before mc_interface_init() so the motor can
+// never be armed (see main.c / mc_interface_set_persistent_fault).
 bool g_xesc2_fatal_config_error = false;
 
 // ------------------------------------------------------------------
@@ -180,6 +181,7 @@ static const xesc2_variant_config_t variant_mini_v1_standard = {
     .mcconf_l_current_min = -6.0f,
     .mcconf_l_in_current_max = 2.0f,
     .mcconf_l_in_current_min = -2.0f,
+    .mcconf_max_current_unbalance = 512.0f,
 };
 
 // -- New v2.x mini
@@ -208,6 +210,7 @@ static const xesc2_variant_config_t variant_mini_v2_standard = {
     .mcconf_l_current_min = -6.0f,
     .mcconf_l_in_current_max = 2.0f,
     .mcconf_l_in_current_min = -2.0f,
+    .mcconf_max_current_unbalance = 512.0f,
 };
 
 static const xesc2_variant_config_t variant_mini_v2_power = {
@@ -235,6 +238,7 @@ static const xesc2_variant_config_t variant_mini_v2_power = {
     .mcconf_l_current_min = -25.0f,
     .mcconf_l_in_current_max = 8.0f,
     .mcconf_l_in_current_min = -8.0f,
+    .mcconf_max_current_unbalance = 512.0f,
 };
 
 // Error fallback (no runtime state, only used when config/OTP is invalid
@@ -263,6 +267,7 @@ static const xesc2_variant_config_t variant_error_fallback = {
     .mcconf_l_current_min = 0.0f,
     .mcconf_l_in_current_max = 0.0f,
     .mcconf_l_in_current_min = 0.0f,
+    .mcconf_max_current_unbalance = 512.0f,
 };
 
 // -- Lite type (XESC2_TYPE_LITE) — DRV8376 gate driver, low-side shunts,
@@ -293,6 +298,7 @@ static const xesc2_variant_config_t variant_lite_standard = {
     .mcconf_l_current_min = -3.0f,
     .mcconf_l_in_current_max = 2.0f,
     .mcconf_l_in_current_min = -2.0f,
+    .mcconf_max_current_unbalance = 1024.0f, // lite: noisier low-side sensing, keep old standalone *1024 threshold
 };
 
 // Global pointer to the active variant configuration

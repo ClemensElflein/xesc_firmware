@@ -68,6 +68,7 @@ typedef struct {
     float mcconf_l_current_min;
     float mcconf_l_in_current_max;
     float mcconf_l_in_current_min;
+    float mcconf_max_current_unbalance; // FAC_CURRENT multiplier (raw ADC unbalance count) for the unbalanced-current fault
 } xesc2_variant_config_t;
 
 // Global pointer to the active variant config, initialized at startup
@@ -77,7 +78,8 @@ extern const xesc2_variant_config_t *g_xesc2_variant;
 extern xesc2_otp_identity_t g_xesc2_otp_identity;
 
 // Fatal config error flag: set when OTP is missing on v2 or corrupt.
-// Causes tmc_error() to report permanent fault, blocking motor start.
+// main() latches a persistent fault before mc_interface_init() so the motor can
+// never be armed (see main.c / mc_interface_set_persistent_fault).
 extern bool g_xesc2_fatal_config_error;
 
 bool xesc2_has_otp_data(void);
