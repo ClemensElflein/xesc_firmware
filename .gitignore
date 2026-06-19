@@ -21,3 +21,4 @@ workspace.code-workspace
 .vscode
 
 cmd/otp_brand/otp_blocks.bin
+out
