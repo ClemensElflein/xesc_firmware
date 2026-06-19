@@ -612,7 +612,15 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 
 		commands_printf("Permanent NRF found: %s", conf_general_permanent_nrf_found ? "Yes" : "No");
 #ifdef HW_HAS_PHASE_SHUNTS
+#ifdef HW_PHASE_SHUNTS_AVAILABLE
+		if (HW_PHASE_SHUNTS_AVAILABLE()) {
+			commands_printf("Phase Shunts: Yes (via OTP)");
+		} else {
+			commands_printf("Phase Shunts: No (via OTP)");
+		}
+#else
 		commands_printf("Phase Shunts: Yes");
+#endif
 #else
 		commands_printf("Phase Shunts: No");
 #endif

@@ -1885,6 +1885,16 @@ void commands_send_appconf(COMM_PACKET_ID packet_id, app_configuration *appconf,
 inline static float hw_lim_upper(float l, float h) {(void)l; return h;}
 
 void commands_apply_mcconf_hw_limits(mc_configuration *mcconf) {
+#if defined(HW_PHASE_SHUNTS_AVAILABLE) && defined(HAS_OTP)
+	// V0_V7 (and V0_V7_INTERPOL) sampling requires phase shunts. On variants
+	// without them (runtime, e.g. xESC2 lite) force the safe low-side V0 mode so
+	// the user cannot configure an unsupported and unsafe sample mode via VESC Tool.
+	if (!HW_PHASE_SHUNTS_AVAILABLE() &&
+			mcconf->foc_control_sample_mode != FOC_CONTROL_SAMPLE_MODE_V0) {
+		mcconf->foc_control_sample_mode = FOC_CONTROL_SAMPLE_MODE_V0;
+	}
+#endif
+
 	utils_truncate_number(&mcconf->l_current_max_scale, 0.0, 1.0);
 	utils_truncate_number(&mcconf->l_current_min_scale, 0.0, 1.0);
 	utils_truncate_number(&mcconf->l_erpm_start, 0.0, 1.0);

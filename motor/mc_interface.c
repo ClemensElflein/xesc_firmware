@@ -320,6 +320,19 @@ const volatile mc_configuration* mc_interface_get_configuration(void) {
 void mc_interface_set_configuration(mc_configuration *configuration) {
 	volatile motor_if_state_t *motor = motor_now();
 
+#if defined(HW_PHASE_SHUNTS_AVAILABLE) && defined(HAS_OTP)
+	// V0_V7 (and V0_V7_INTERPOL) sampling requires phase shunts. On variants
+	// without them (runtime, e.g. xESC2 lite) force the safe low-side V0 mode.
+	// This is the authoritative gate: every applied config passes through here,
+	// including temporary configs built during motor detection/calibration that
+	// bypass the VESC Tool write path. Clamping the config before it is copied
+	// into motor->m_conf guarantees the FOC code never runs an unsupported and
+	// unsafe sample mode, regardless of how the config was produced.
+	if (!HW_PHASE_SHUNTS_AVAILABLE()) {
+		configuration->foc_control_sample_mode = FOC_CONTROL_SAMPLE_MODE_V0;
+	}
+#endif
+
 #if defined HW_HAS_DUAL_PARALLEL
 	configuration->motor_type = MOTOR_TYPE_FOC;
 #else

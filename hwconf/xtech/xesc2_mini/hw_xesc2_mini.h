@@ -39,12 +39,19 @@ void hw_xesc2_reset_drv_faults(void);
 
 // HW properties. Both gate drivers are compiled in and dispatched at runtime,
 // so both HW_HAS_* markers are defined (each driver .c self-guards on its own).
-// HW_HAS_PHASE_SHUNTS is the superset: FOC supports both phase-shunt (mini) and
-// low-side-only (lite) sampling, selected per variant via foc_control_sample_mode.
+// HW_HAS_PHASE_SHUNTS is the compile-time superset: it pulls in the phase-shunt
+// FOC sampling code so the mini/power variants can use V0_V7 sampling. Whether a
+// given board actually has phase shunts is a RUNTIME property (mini/power do,
+// lite does not), exposed via HW_PHASE_SHUNTS_AVAILABLE() below. Code that lets
+// the user pick phase-shunt-only options must gate on the runtime check, not just
+// the macro, so a lite board cannot be configured into an unsupported mode.
 #define HW_HAS_TMC6200
 #define HW_HAS_DRV8376
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
+
+// Runtime phase-shunt capability (per OTP variant). 1 on mini/power, 0 on lite.
+#define HW_PHASE_SHUNTS_AVAILABLE()		(g_xesc2_variant->has_phase_shunts)
 
 // TMC6200 configuration (runtime from variant; ignored on DRV8376 variants)
 #define TMC6200_CURRENT_AMP_GAIN (g_xesc2_variant->tmc6200_amp_gain)

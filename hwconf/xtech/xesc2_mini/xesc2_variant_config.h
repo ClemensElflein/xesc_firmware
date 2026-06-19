@@ -49,6 +49,7 @@ typedef struct {
     const char *hw_name;
     uint8_t driver_type;     // Gate driver IC (XESC2_DRIVER_*)
     uint8_t gate_active_high; // 1: ENABLE_GATE drives pad high; 0: drives low
+    uint8_t has_phase_shunts; // 1: phase-shunt current sense (mini/power); 0: low-side only (lite)
     float current_amp_gain;
     float current_shunt_res;
     float get_current_scale;     // ADC scaling for GET_CURRENT* macros
