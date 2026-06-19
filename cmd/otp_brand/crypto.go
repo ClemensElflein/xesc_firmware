@@ -10,15 +10,14 @@ import (
 )
 
 // BLS min-sig variant: signatures are compressed G1 (48 bytes), public keys are
-// compressed G2 (96 bytes).
+// compressed G2 (96 bytes). The DST is the full, canonical IETF ciphersuite tag
+// for G1 signatures with proof-of-possession, so signatures verify against any
+// standard BLS12-381 implementation (py_ecc, noble-curves, gnark-crypto, ...).
 //
-// IMPORTANT — the DST is the first 29 bytes only. The original tool passed a
-// hardcoded length of 29 to blst, truncating this string to
-// "BLS_SIG_BLS12381G1_XMD:SHA-25". That truncated DST is what every existing key
-// and signature was produced with, so it MUST be reproduced byte-for-byte here
-// for compatibility (changing it would invalidate all branded boards). Likely an
-// upstream bug, but it is now load-bearing.
-var blsDST = []byte("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")[:29]
+// NOTE: the original tool truncated this to its first 29 bytes (it passed a
+// hardcoded length of 29 to blst). Signatures made with that truncated DST do
+// NOT cross-verify with this canonical one — see cmd/otp_brand/verify.py.
+var blsDST = []byte("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
 
 type blsSignature = blst.P1Affine // signature in G1
 type blsPublicKey = blst.P2Affine // public key in G2
