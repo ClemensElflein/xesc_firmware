@@ -1,0 +1,9 @@
+# Scoped to this Dockerfile (BuildKit). The repo root is the build context, but
+# the OTP tool only needs the Go sources plus one header — exclude everything
+# else (ChibiOS, lispBM, blackmagic, build artifacts) so the context stays tiny.
+**
+!cmd/otp_brand/**
+!hwconf/xtech/xesc2_mini/xesc2_otp.h
+
+# Don't ship the prebuilt host binary; it gets rebuilt in the image.
+cmd/otp_brand/otp_brand

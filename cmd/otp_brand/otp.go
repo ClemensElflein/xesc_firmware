@@ -1,9 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini -I/tmp/blst/bindings -I/tmp/blst/build -I/tmp/blst/src -D__BLST_CGO__ -fno-builtin-memcpy -fno-builtin-memset
-#cgo amd64 CFLAGS: -D__ADX__ -mno-avx
-#cgo LDFLAGS: -L/tmp/blst -lblst
+#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini
 
 #include "xesc2_otp.h"
 */

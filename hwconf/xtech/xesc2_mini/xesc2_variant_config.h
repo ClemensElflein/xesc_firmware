@@ -89,6 +89,7 @@ const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t 
 void xesc2_detect_and_apply_variant(void);
 
 void xesc2_terminal_otp_info(int argc, const char **argv);
+void xesc2_terminal_otp_brand(int argc, const char **argv);
 void xesc2_print_hw_status_otp_info(void);
 
 #endif /* XESC2_VARIANT_CONFIG_H_ */

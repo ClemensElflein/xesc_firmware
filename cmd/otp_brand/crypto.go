@@ -1,23 +1,27 @@
 package main
 
-/*
-#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini -I/tmp/blst/bindings -I/tmp/blst/build -I/tmp/blst/src -D__BLST_CGO__ -fno-builtin-memcpy -fno-builtin-memset
-#cgo amd64 CFLAGS: -D__ADX__ -mno-avx
-#cgo LDFLAGS: -L/tmp/blst -lblst
-
-#include "xesc2_otp.h"
-#include "blst.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
-	"unsafe"
+
+	blst "github.com/supranational/blst/bindings/go"
 )
+
+// BLS min-sig variant: signatures are compressed G1 (48 bytes), public keys are
+// compressed G2 (96 bytes).
+//
+// IMPORTANT — the DST is the first 29 bytes only. The original tool passed a
+// hardcoded length of 29 to blst, truncating this string to
+// "BLS_SIG_BLS12381G1_XMD:SHA-25". That truncated DST is what every existing key
+// and signature was produced with, so it MUST be reproduced byte-for-byte here
+// for compatibility (changing it would invalidate all branded boards). Likely an
+// upstream bug, but it is now load-bearing.
+var blsDST = []byte("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")[:29]
+
+type blsSignature = blst.P1Affine // signature in G1
+type blsPublicKey = blst.P2Affine // public key in G2
 
 // signBlock produces a 48-byte BLS12-381 compressed G1 signature over dataBlock[0:14].
 func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
@@ -25,38 +29,29 @@ func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("dataBlock must be 32 bytes, keyBytes must be 32 bytes")
 	}
 
-	// Load scalar from key bytes (big-endian)
-	var sk C.blst_scalar
-	C.blst_scalar_from_bendian(&sk, (*C.uchar)(unsafe.Pointer(&keyBytes[0])))
+	sk := new(blst.SecretKey).FromBEndian(keyBytes)
+	if sk == nil {
+		return nil, fmt.Errorf("invalid private key (not a valid scalar)")
+	}
 
-	// Hash message (bytes 0..13) to G1
-	var hashP1 C.blst_p1
-	dst := C.CString("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
-	defer C.free(unsafe.Pointer(dst))
-	msg := dataBlock[0:14]
-	C.blst_hash_to_g1(&hashP1, (*C.uchar)(unsafe.Pointer(&msg[0])), C.size_t(len(msg)),
-		(*C.uchar)(unsafe.Pointer(dst)), C.size_t(29), nil, 0)
+	sig := new(blsSignature).Sign(sk, dataBlock[0:14], blsDST)
+	if sig == nil {
+		return nil, fmt.Errorf("signing failed")
+	}
+	sigCompressed := sig.Compress()
+	if len(sigCompressed) != 48 {
+		return nil, fmt.Errorf("unexpected signature length %d", len(sigCompressed))
+	}
 
-	// Sign: G1 hash × scalar → G1 point (min-sig-size, signature in G1)
-	var sig C.blst_p1
-	C.blst_sign_pk_in_g2(&sig, &hashP1, &sk)
-
-	// Convert to affine and compress (48 bytes)
-	var sigAff C.blst_p1_affine
-	C.blst_p1_to_affine(&sigAff, &sig)
-
-	var sigCompressed [48]byte
-	C.blst_p1_affine_compress((*C.uchar)(unsafe.Pointer(&sigCompressed[0])), &sigAff)
-
-	// Self-check: verify the signature we just produced
-	if valid, err := verifySignatureWithSk(keyBytes, dataBlock, sigCompressed[:]); err != nil || !valid {
+	// Self-check: verify the signature we just produced.
+	if valid, err := verifySignatureWithSk(keyBytes, dataBlock, sigCompressed); err != nil || !valid {
 		if err != nil {
 			return nil, fmt.Errorf("BUG: freshly produced signature fails self-verification: %w", err)
 		}
 		return nil, fmt.Errorf("BUG: freshly produced signature fails self-verification")
 	}
 
-	return sigCompressed[:], nil
+	return sigCompressed, nil
 }
 
 // verifySignatureFromFile verifies the BLS signature stored in a 64-byte otp_blocks.bin
@@ -110,29 +105,24 @@ func verifySignatureWithSk(skBytes, msg, sig []byte) (bool, error) {
 		return false, fmt.Errorf("message must be at least 14 bytes")
 	}
 
-	// Derive public key in G2 from private key
-	var sk C.blst_scalar
-	C.blst_scalar_from_bendian(&sk, (*C.uchar)(unsafe.Pointer(&skBytes[0])))
-	var pk C.blst_p2
-	C.blst_sk_to_pk_in_g2(&pk, &sk)
-	var pkAff C.blst_p2_affine
-	C.blst_p2_to_affine(&pkAff, &pk)
+	// Derive public key in G2 from private key.
+	sk := new(blst.SecretKey).FromBEndian(skBytes)
+	if sk == nil {
+		return false, fmt.Errorf("invalid private key (not a valid scalar)")
+	}
+	pk := new(blsPublicKey).From(sk)
+	if pk == nil {
+		return false, fmt.Errorf("public key derivation failed")
+	}
 
-	// Uncompress signature from compressed G1
-	var sigAff C.blst_p1_affine
-	if C.blst_p1_uncompress(&sigAff, (*C.uchar)(unsafe.Pointer(&sig[0]))) != C.BLST_SUCCESS {
+	// Uncompress signature from compressed G1.
+	sigAff := new(blsSignature).Uncompress(sig)
+	if sigAff == nil {
 		return false, fmt.Errorf("signature decompression failed")
 	}
 
-	// Core verify: e(sig, g2) == e(H(m), pk)
-	// hash_or_encode=true: blst hashes msg internally
-	dst := C.CString("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
-	defer C.free(unsafe.Pointer(dst))
-	res := C.blst_core_verify_pk_in_g2(&pkAff, &sigAff, true,
-		(*C.uchar)(unsafe.Pointer(&msg[0])), C.size_t(14),
-		(*C.uchar)(unsafe.Pointer(dst)), C.size_t(29),
-		nil, 0)
-	return res == C.BLST_SUCCESS, nil
+	// Core verify: e(sig, g2) == e(H(m), pk), hashing the 14 data bytes.
+	return sigAff.Verify(true, pk, true, msg[0:14], blsDST), nil
 }
 
 // verifySignatureFromPubFile verifies using a 96-byte compressed G2 public key file.
@@ -190,26 +180,19 @@ func verifySignatureWithPub(pkCompressed, msg, sig []byte) (bool, error) {
 		return false, fmt.Errorf("message must be at least 14 bytes")
 	}
 
-	// Uncompress public key from G2
-	var pkAff C.blst_p2_affine
-	if C.blst_p2_uncompress(&pkAff, (*C.uchar)(unsafe.Pointer(&pkCompressed[0]))) != C.BLST_SUCCESS {
+	// Uncompress public key from G2.
+	pk := new(blsPublicKey).Uncompress(pkCompressed)
+	if pk == nil {
 		return false, fmt.Errorf("public key decompression failed")
 	}
 
-	// Uncompress signature from compressed G1
-	var sigAff C.blst_p1_affine
-	if C.blst_p1_uncompress(&sigAff, (*C.uchar)(unsafe.Pointer(&sig[0]))) != C.BLST_SUCCESS {
+	// Uncompress signature from compressed G1.
+	sigAff := new(blsSignature).Uncompress(sig)
+	if sigAff == nil {
 		return false, fmt.Errorf("signature decompression failed")
 	}
 
-	// Core verify: e(sig, g2) == e(H(m), pk)
-	dst := C.CString("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
-	defer C.free(unsafe.Pointer(dst))
-	res := C.blst_core_verify_pk_in_g2(&pkAff, &sigAff, true,
-		(*C.uchar)(unsafe.Pointer(&msg[0])), C.size_t(14),
-		(*C.uchar)(unsafe.Pointer(dst)), C.size_t(29),
-		nil, 0)
-	return res == C.BLST_SUCCESS, nil
+	return sigAff.Verify(true, pk, true, msg[0:14], blsDST), nil
 }
 
 // generateKey creates a new BLS12-381 key pair and saves both private and public keys.
@@ -224,30 +207,26 @@ func generateKey(path string) error {
 		return err
 	}
 
-	var sk C.blst_scalar
-	C.blst_keygen(&sk, (*C.uchar)(unsafe.Pointer(&ikm[0])), C.size_t(len(ikm)), nil, 0)
+	sk := blst.KeyGen(ikm[:])
+	if sk == nil {
+		return fmt.Errorf("key generation failed")
+	}
+	keyBytes := sk.ToBEndian()
 
-	var keyBytes [32]byte
-	C.blst_bendian_from_scalar((*C.uchar)(unsafe.Pointer(&keyBytes[0])), &sk)
+	// Compute public key in G2 (min-sig variant: sig in G1, pk in G2).
+	pk := new(blsPublicKey).From(sk)
+	pubBytes := pk.Compress()
 
-	// Compute public key in G2 (min-sig-size: sig in G1, pk in G2)
-	var pk C.blst_p2
-	C.blst_sk_to_pk_in_g2(&pk, &sk)
-	var pkAff C.blst_p2_affine
-	C.blst_p2_to_affine(&pkAff, &pk)
-	var pubBytes [96]byte
-	C.blst_p2_affine_compress((*C.uchar)(unsafe.Pointer(&pubBytes[0])), &pkAff)
-
-	if err := os.WriteFile(path, keyBytes[:], 0600); err != nil {
+	if err := os.WriteFile(path, keyBytes, 0600); err != nil {
 		return err
 	}
 
 	pubPath := path + ".pub"
-	os.WriteFile(pubPath, []byte(hex.EncodeToString(pubBytes[:96])+"\n"), 0644)
+	os.WriteFile(pubPath, []byte(hex.EncodeToString(pubBytes)+"\n"), 0644)
 
 	fmt.Printf("Private key saved to: %s (%d bytes)\n", path, len(keyBytes))
-	fmt.Printf("Key hex:    %s\n", hex.EncodeToString(keyBytes[:]))
-	fmt.Printf("Public key: %s\n", hex.EncodeToString(pubBytes[:96]))
+	fmt.Printf("Key hex:    %s\n", hex.EncodeToString(keyBytes))
+	fmt.Printf("Public key: %s\n", hex.EncodeToString(pubBytes))
 	fmt.Printf("Public key saved to: %s\n", pubPath)
 	fmt.Println()
 	fmt.Println("Store this key securely! Recommended: ~/.config/xesc/keys/builder*.key")
@@ -262,18 +241,15 @@ func dumpPubKey(path string) error {
 		return err
 	}
 
-	var sk C.blst_scalar
-	C.blst_scalar_from_bendian(&sk, (*C.uchar)(unsafe.Pointer(&keyBytes[0])))
-
-	var pk C.blst_p2
-	C.blst_sk_to_pk_in_g2(&pk, &sk)
-	var pkAff C.blst_p2_affine
-	C.blst_p2_to_affine(&pkAff, &pk)
-	var pubBytes [96]byte
-	C.blst_p2_affine_compress((*C.uchar)(unsafe.Pointer(&pubBytes[0])), &pkAff)
+	sk := new(blst.SecretKey).FromBEndian(keyBytes)
+	if sk == nil {
+		return fmt.Errorf("invalid private key (not a valid scalar)")
+	}
+	pk := new(blsPublicKey).From(sk)
+	pubBytes := pk.Compress()
 
 	fmt.Printf("Private key: %s\n", path)
-	fmt.Printf("Public key:  %s\n", hex.EncodeToString(pubBytes[:96]))
+	fmt.Printf("Public key:  %s\n", hex.EncodeToString(pubBytes))
 	return nil
 }
 

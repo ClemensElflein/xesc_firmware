@@ -1,13 +1,9 @@
 package main
 
 /*
-#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini -I/tmp/blst/bindings -I/tmp/blst/build -I/tmp/blst/src -D__BLST_CGO__ -fno-builtin-memcpy -fno-builtin-memset
-#cgo amd64 CFLAGS: -D__ADX__ -mno-avx
-#cgo LDFLAGS: -L/tmp/blst -lblst
+#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini
 
 #include "xesc2_otp.h"
-#include "blst.h"
-#include <stdlib.h>
 */
 import "C"
 
@@ -38,6 +34,7 @@ func main() {
 		flash     = flag.Bool("flash", false, "Flash OTP blocks after generation")
 		dryRun    = flag.Bool("dry-run", false, "Show what would be done without writing")
 		dumpC     = flag.Bool("dump-c", false, "Output both blocks as C array for firmware test mode")
+		emitHex   = flag.Bool("emit-hex", false, "Mode 2: print the 64-byte signed block as 128 hex chars on stdout (diagnostics to stderr) for piping into the firmware otp_brand command")
 	)
 	flag.Parse()
 
@@ -143,6 +140,21 @@ func main() {
 	copy(out[0:16], block[0:16])
 	copy(out[16:32], sig[0:16])
 	copy(out[32:64], sig[16:48])
+
+	// Mode 2: emit the 64-byte block as a single hex line on stdout for piping
+	// into the firmware "otp_brand <pair> <hex>" command (e.g. via a Python
+	// helper that sends it over the VESC comm link). Diagnostics go to stderr so
+	// stdout stays a clean hex string. Note: the serial auto-increment counter is
+	// NOT persisted in this mode (the actual write happens later, on-device) —
+	// pass --serial explicitly for production runs.
+	if *emitHex {
+		fmt.Fprintf(os.Stderr,
+			"Board: %s  Variant: %s  HW: %s  Serial: %d  Timestamp: %d  CRC16: 0x%04X\n",
+			*boardType, *variant, *hw, serialNum, ts,
+			binary.LittleEndian.Uint16(block[int(C.XESC2_OTP_OFFS_CRC):]))
+		fmt.Println(hex.EncodeToString(out))
+		return
+	}
 
 	crcVal := binary.LittleEndian.Uint16(block[int(C.XESC2_OTP_OFFS_CRC):])
 	fmt.Printf("Board:      %s\n", *boardType)

@@ -34,7 +34,9 @@
 #include "commands.h"
 #include "terminal.h"
 #include "hw_xesc2_mini.h"
+#include "flash_helper.h"
 #include <time.h>
+#include <string.h>
 
 // Global OTP identity, populated at startup
 xesc2_otp_identity_t g_xesc2_otp_identity = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -430,6 +432,115 @@ void xesc2_terminal_otp_info(int argc, const char **argv) {
         commands_printf("No valid OTP identity found, using defaults.");
     }
     commands_printf(" ");
+}
+
+// ------------------------------------------------------------------
+// Terminal: otp_brand command
+//   Usage: otp_brand <pair> <128 hex chars>
+// Programs a host-prepared, signed 64-byte block pair (block0[0..31] +
+// block1[0..31] = data + CRC16 + BLS signature, produced by the otp_brand host
+// tool) into the STM32 OTP region. The block's magic/version/CRC are validated
+// first, and the target pair must still be erased (OTP can only clear bits).
+// Lock bytes are never touched, so the 8-slot rebrand scheme stays intact.
+// ------------------------------------------------------------------
+static int otp_hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+void xesc2_terminal_otp_brand(int argc, const char **argv) {
+    if (argc != 3) {
+        commands_printf("Usage: otp_brand <pair 0..%d> <128 hex chars>",
+                        XESC2_OTP_NUM_PAIRS - 1);
+        return;
+    }
+
+    // Parse the pair index (decimal).
+    int pair = 0;
+    for (const char *p = argv[1]; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            commands_printf("otp_brand: invalid pair '%s'", argv[1]);
+            return;
+        }
+        pair = pair * 10 + (*p - '0');
+    }
+    if (argv[1][0] == '\0' || pair < 0 || pair >= XESC2_OTP_NUM_PAIRS) {
+        commands_printf("otp_brand: pair out of range (0..%d)",
+                        XESC2_OTP_NUM_PAIRS - 1);
+        return;
+    }
+
+    // Parse 64 bytes from 128 hex chars.
+    const char *hexstr = argv[2];
+    if (strlen(hexstr) != 64 * 2) {
+        commands_printf("otp_brand: expected 128 hex chars, got %d",
+                        (int)strlen(hexstr));
+        return;
+    }
+    uint8_t blk[64];
+    for (int i = 0; i < 64; i++) {
+        int hi = otp_hexval(hexstr[i * 2]);
+        int lo = otp_hexval(hexstr[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            commands_printf("otp_brand: bad hex char at byte %d", i);
+            return;
+        }
+        blk[i] = (uint8_t)((hi << 4) | lo);
+    }
+
+    // Validate header + CRC before burning OTP.
+    if (blk[XESC2_OTP_OFFS_MAGIC] != XESC2_OTP_MAGIC) {
+        commands_printf("otp_brand: bad magic 0x%02X (want 0x%02X)",
+                        blk[XESC2_OTP_OFFS_MAGIC], XESC2_OTP_MAGIC);
+        return;
+    }
+    if (blk[XESC2_OTP_OFFS_VERSION] != XESC2_OTP_VERSION) {
+        commands_printf("otp_brand: bad version %d (want %d)",
+                        blk[XESC2_OTP_OFFS_VERSION], XESC2_OTP_VERSION);
+        return;
+    }
+    uint16_t want_crc = (uint16_t)blk[XESC2_OTP_OFFS_CRC] |
+                        ((uint16_t)blk[XESC2_OTP_OFFS_CRC + 1] << 8);
+    uint16_t got_crc = otp_crc16(blk + XESC2_OTP_CRC_DATA_OFFS,
+                                 XESC2_OTP_CRC_DATA_LEN);
+    if (want_crc != got_crc) {
+        commands_printf("otp_brand: CRC mismatch (calc 0x%04X, block 0x%04X)",
+                        got_crc, want_crc);
+        return;
+    }
+
+    // OTP can only clear bits (1 -> 0): require the target pair to be erased.
+    uint32_t addr = XESC2_OTP_BASE_ADDR +
+                    (uint32_t)pair * 2 * XESC2_OTP_BLOCK_SIZE;
+    const uint8_t *cur = (const uint8_t *)addr;
+    for (int i = 0; i < 64; i++) {
+        if (cur[i] != 0xFF) {
+            commands_printf("otp_brand: pair %d not empty (byte %d = 0x%02X), "
+                            "pick a free pair", pair, i, cur[i]);
+            return;
+        }
+    }
+
+    // Program via the shared flash helper (motor release, kernel lock, watchdog).
+    uint16_t res = flash_helper_write_otp(addr, blk, 64);
+    if (res != 0) {
+        commands_printf("otp_brand: flash write failed (code %u)", res);
+        return;
+    }
+
+    // Verify readback.
+    for (int i = 0; i < 64; i++) {
+        if (cur[i] != blk[i]) {
+            commands_printf("otp_brand: verify failed at byte %d "
+                            "(got 0x%02X, want 0x%02X)", i, cur[i], blk[i]);
+            return;
+        }
+    }
+
+    commands_printf("otp_brand: pair %d programmed OK at 0x%08X. "
+                    "Power-cycle to apply.", pair, (unsigned int)addr);
 }
 
 // ------------------------------------------------------------------

@@ -1161,6 +1161,8 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 #ifdef HAS_OTP
 	} else if (strcmp(argv[0], "otp_info") == 0) {
 		xesc2_terminal_otp_info(argc, (const char**)argv);
+	} else if (strcmp(argv[0], "otp_brand") == 0) {
+		xesc2_terminal_otp_brand(argc, (const char**)argv);
 #endif
 	} else if (strcmp(argv[0], "fw_info") == 0) {
 		commands_printf("Git Branch: %s", GIT_BRANCH_NAME);
@@ -1294,6 +1296,8 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 #ifdef HAS_OTP
 		commands_printf("otp_info");
 		commands_printf("  Scan OTP memory and display stored board identities.");
+		commands_printf("otp_brand [pair] [128 hex chars]");
+		commands_printf("  Program a host-signed 64-byte OTP block pair (from the otp_brand tool).");
 #endif
 
 		commands_printf("rebootwdt");
