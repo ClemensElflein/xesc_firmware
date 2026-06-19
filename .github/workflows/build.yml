@@ -26,9 +26,6 @@ jobs:
       - name: Build xesc2_mini
         run: make xesc2_mini
 
-      - name: Build xesc2_lite
-        run: make xesc2_lite
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -36,8 +33,6 @@ jobs:
           path: |
             build/xesc2_mini/xesc2_mini.bin
             build/xesc2_mini/xesc2_mini.elf
-            build/xesc2_lite/xesc2_lite.bin
-            build/xesc2_lite/xesc2_lite.elf
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
@@ -59,5 +54,3 @@ jobs:
           files: |
             artifacts/xesc2_mini.bin
             artifacts/xesc2_mini.elf
-            artifacts/xesc2_lite.bin
-            artifacts/xesc2_lite.elf

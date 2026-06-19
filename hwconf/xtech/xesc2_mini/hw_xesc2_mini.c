@@ -22,6 +22,7 @@
 #include "stm32f4xx_conf.h"
 #include "utils.h"
 #include "tmc6200.h"
+#include "drv8376.h"
 #include "terminal.h"
 #include "commands.h"
 #include "mc_interface.h"
@@ -37,8 +38,40 @@ static const I2CConfig i2cfg = {
 		STD_DUTY_CYCLE
 };
 
-bool tmc_error() {
-    return !tmc6200_ok() || palReadPad(GPIOB, 7);
+// ENABLE_GATE/DISABLE_GATE pin is GPIOB5 on every variant; only the active
+// polarity differs (mini: active high, lite: active low).
+void hw_xesc2_enable_gate(void) {
+	if (g_xesc2_variant->gate_active_high) {
+		palSetPad(GPIOB, 5);
+	} else {
+		palClearPad(GPIOB, 5);
+	}
+}
+
+void hw_xesc2_disable_gate(void) {
+	if (g_xesc2_variant->gate_active_high) {
+		palClearPad(GPIOB, 5);
+	} else {
+		palSetPad(GPIOB, 5);
+	}
+}
+
+// Runtime gate-driver fault check. The shared fault pin is GPIOB7, but its
+// active level differs between the two drivers (TMC6200: high = fault;
+// DRV8376: low = fault, with pull-up).
+bool hw_xesc2_drv_fault(void) {
+	if (g_xesc2_variant->driver_type == XESC2_DRIVER_DRV8376) {
+		return drv8376_config_error() || !palReadPad(GPIOB, 7);
+	}
+	return !tmc6200_ok() || palReadPad(GPIOB, 7);
+}
+
+void hw_xesc2_reset_drv_faults(void) {
+	if (g_xesc2_variant->driver_type == XESC2_DRIVER_DRV8376) {
+		drv8376_reset_faults();
+	} else {
+		tmc6200_reset_faults();
+	}
 }
 
 void hw_init_gpio(void) {
@@ -108,7 +141,13 @@ void hw_init_gpio(void) {
 	palSetPadMode(GPIOC, 3, PAL_MODE_INPUT_ANALOG);
 	palSetPadMode(GPIOC, 4, PAL_MODE_INPUT_ANALOG);
 
-	tmc6200_init();
+	// Initialize the gate driver selected by the active variant. Each driver
+	// configures its own SPI/control pins.
+	if (g_xesc2_variant->driver_type == XESC2_DRIVER_DRV8376) {
+		drv8376_init();
+	} else {
+		tmc6200_init();
+	}
 }
 
 void hw_setup_adc_channels(void) {

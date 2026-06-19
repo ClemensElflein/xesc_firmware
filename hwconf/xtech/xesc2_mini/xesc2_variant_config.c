@@ -159,6 +159,8 @@ static const xesc2_variant_config_t variant_mini_v1_standard = {
     .type_id = XESC2_TYPE_MINI,
     .variant_id = XESC2_VARIANT_V1_STD,  // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
     .hw_name = "xESC2-mini_v1",
+    .driver_type = XESC2_DRIVER_TMC6200,
+    .gate_active_high = 1,
     .current_amp_gain = (5.0f * 0.595f), // 5x gain * voltage divider ratio
     .current_shunt_res = 0.033f,
     .get_current_scale = 1.11f,
@@ -184,6 +186,8 @@ static const xesc2_variant_config_t variant_mini_v2_standard = {
     .type_id = XESC2_TYPE_MINI,
     .variant_id = XESC2_VARIANT_V2_STD,
     .hw_name = "xESC2-mini_v2",   // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
+    .driver_type = XESC2_DRIVER_TMC6200,
+    .gate_active_high = 1,
     .current_amp_gain = 5.0f,
     .current_shunt_res = 0.025f,
     .get_current_scale = 0.935f,
@@ -208,6 +212,8 @@ static const xesc2_variant_config_t variant_mini_v2_power = {
     .type_id = XESC2_TYPE_MINI,
     .variant_id = XESC2_VARIANT_V2_PWR,
     .hw_name = "xESC2-power_v2", // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
+    .driver_type = XESC2_DRIVER_TMC6200,
+    .gate_active_high = 1,
     .current_amp_gain = 10.0f,
     .current_shunt_res = 0.003f,
     .get_current_scale = 0.935f,
@@ -233,6 +239,8 @@ static const xesc2_variant_config_t variant_error_fallback = {
     .type_id = XESC2_TYPE_MINI,
     .variant_id = 0xFF,           // marker for invalid/missing config
     .hw_name = "xESC2_OTP-ERROR", // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
+    .driver_type = XESC2_DRIVER_TMC6200,
+    .gate_active_high = 1,
     .current_amp_gain = 1.0f,
     .current_shunt_res = 0.033f,
     .get_current_scale = 1.0f,
@@ -253,8 +261,34 @@ static const xesc2_variant_config_t variant_error_fallback = {
     .mcconf_l_in_current_min = 0.0f,
 };
 
-// -- Lite type (XESC2_TYPE_LITE) —
-// TODO: Add lite variants if usefull to integrated here
+// -- Lite type (XESC2_TYPE_LITE) — DRV8376 gate driver, low-side shunts,
+// active-low gate enable. Current sense uses inverted polarity, which the
+// unified GET_CURRENT macro expresses as (4095 - adc * scale) with scale = 1.0.
+static const xesc2_variant_config_t variant_lite_standard = {
+    .type_id = XESC2_TYPE_LITE,
+    .variant_id = XESC2_VARIANT_LITE_STD,
+    .hw_name = "xESC2-lite", // Do not use spaces in hw_name, it becomes part of the UAVCAN node name
+    .driver_type = XESC2_DRIVER_DRV8376,
+    .gate_active_high = 0,         // lite enables the gate driver by driving the pad LOW
+    .current_amp_gain = 0.4f,
+    .current_shunt_res = 1.0f,
+    .get_current_scale = 1.0f,     // inverted polarity: 4095 - adc
+    .tmc6200_amp_gain = 0,         // unused (DRV8376)
+    .tmc6200_drvstrength = 0,      // unused (DRV8376)
+    .lim_current_min = -3.0f,
+    .lim_current_max = 3.0f,
+    .lim_current_in_min = -9.0f,
+    .lim_current_in_max = 9.0f,
+    .lim_current_abs_max = 15.0f,
+    .lim_vin_min = 6.0f,
+    .lim_vin_max = 55.0f,
+    .lim_temp_fet_max = 90.0f,
+    .l_max_abs_current = 4.0f,
+    .mcconf_l_current_max = 3.0f,
+    .mcconf_l_current_min = -3.0f,
+    .mcconf_l_in_current_max = 2.0f,
+    .mcconf_l_in_current_min = -2.0f,
+};
 
 // Global pointer to the active variant configuration
 const xesc2_variant_config_t *g_xesc2_variant = &variant_error_fallback;
@@ -277,7 +311,10 @@ const xesc2_variant_config_t *xesc2_get_variant_config(uint8_t type_id, uint8_t 
             }
             break;
         case XESC2_TYPE_LITE:
-            // No lite variants defined yet
+            switch (variant_id) {
+                case XESC2_VARIANT_LITE_STD:
+                    return &variant_lite_standard;
+            }
             break;
     }
 

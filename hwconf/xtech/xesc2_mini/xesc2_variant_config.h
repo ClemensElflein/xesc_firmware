@@ -26,6 +26,11 @@
 
 // Note: Type and variant IDs are defined in xesc2_otp.h
 
+// Gate driver IC used by a variant. Selects which driver implementation is
+// initialized and dispatched to at runtime (single firmware for all variants).
+#define XESC2_DRIVER_TMC6200 0 // xESC2 mini/power
+#define XESC2_DRIVER_DRV8376 1 // xESC2 lite
+
 // Structure returned by OTP scanner
 typedef struct {
     uint8_t type_id;    // Board type from OTP (XESC2_TYPE_*)
@@ -42,6 +47,8 @@ typedef struct {
     uint8_t type_id;    // Board type this config belongs to
     uint8_t variant_id; // Variant this config belongs to
     const char *hw_name;
+    uint8_t driver_type;     // Gate driver IC (XESC2_DRIVER_*)
+    uint8_t gate_active_high; // 1: ENABLE_GATE drives pad high; 0: drives low
     float current_amp_gain;
     float current_shunt_res;
     float get_current_scale;     // ADC scaling for GET_CURRENT* macros

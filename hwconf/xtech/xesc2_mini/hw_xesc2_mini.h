@@ -24,30 +24,39 @@
 
 #include "xesc2_variant_config.h"
 
-bool tmc_error(void);
-void tmc6200_reset_faults(void);
+// Single firmware for all xESC2 variants. The active gate driver (TMC6200 on
+// mini/power, DRV8376 on lite) and the gate-enable polarity are selected at
+// runtime from the OTP variant config. These helpers dispatch accordingly.
+void hw_xesc2_enable_gate(void);
+void hw_xesc2_disable_gate(void);
+bool hw_xesc2_drv_fault(void);
+void hw_xesc2_reset_drv_faults(void);
 
 #define HW_NAME					(g_xesc2_variant->hw_name)
 
 #define HW_MAJOR				2
 #define HW_MINOR				0
 
-// HW properties
+// HW properties. Both gate drivers are compiled in and dispatched at runtime,
+// so both HW_HAS_* markers are defined (each driver .c self-guards on its own).
+// HW_HAS_PHASE_SHUNTS is the superset: FOC supports both phase-shunt (mini) and
+// low-side-only (lite) sampling, selected per variant via foc_control_sample_mode.
 #define HW_HAS_TMC6200
+#define HW_HAS_DRV8376
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
 
-// TMC6200 configuration (runtime from variant)
+// TMC6200 configuration (runtime from variant; ignored on DRV8376 variants)
 #define TMC6200_CURRENT_AMP_GAIN (g_xesc2_variant->tmc6200_amp_gain)
 #define TMC6200_DRVSTRENGTH (g_xesc2_variant->tmc6200_drvstrength)
 
-// Macros
-#define ENABLE_GATE()			palSetPad(GPIOB, 5)
-#define DISABLE_GATE()			palClearPad(GPIOB, 5)
+// Macros (runtime gate-driver dispatch)
+#define ENABLE_GATE()			hw_xesc2_enable_gate()
+#define DISABLE_GATE()			hw_xesc2_disable_gate()
 
 #define DCCAL_ON()
 #define DCCAL_OFF()
-#define IS_DRV_FAULT()			(tmc_error())
+#define IS_DRV_FAULT()			(hw_xesc2_drv_fault())
 
 
 #define LED_GREEN_ON()			palSetPad(GPIOB, 0)
@@ -220,6 +229,9 @@ void tmc6200_reset_faults(void);
 #define HW_SPI_PIN_MISO			6
 
 
+// Gate-driver SPI shares the same physical bus pins for both ICs. Only the
+// extra DRV8376 control pins (nSLEEP, ILIMIT) differ; they are configured by
+// drv8376_init() on lite variants.
 #define TMC6200_MOSI_GPIO		GPIOB
 #define TMC6200_MOSI_PIN		4
 #define TMC6200_MISO_GPIO		GPIOB
@@ -229,7 +241,20 @@ void tmc6200_reset_faults(void);
 #define TMC6200_CS_GPIO			GPIOC
 #define TMC6200_CS_PIN			9
 
-#define HW_RESET_DRV_FAULTS()		tmc6200_reset_faults()
+#define DRV8376_MOSI_GPIO		GPIOB
+#define DRV8376_MOSI_PIN		4
+#define DRV8376_MISO_GPIO		GPIOB
+#define DRV8376_MISO_PIN		3
+#define DRV8376_SCK_GPIO		GPIOC
+#define DRV8376_SCK_PIN			10
+#define DRV8376_CS_GPIO			GPIOC
+#define DRV8376_CS_PIN			9
+#define DRV8376_nSLEEP_GPIO		GPIOA
+#define DRV8376_nSLEEP_PIN		15
+#define DRV8376_ILIMIT_GPIO		GPIOA
+#define DRV8376_ILIMIT_PIN		4
+
+#define HW_RESET_DRV_FAULTS()		hw_xesc2_reset_drv_faults()
 
 
 // Measurement macros

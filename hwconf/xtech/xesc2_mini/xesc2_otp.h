@@ -90,9 +90,12 @@
 #define XESC2_TYPE_MINI 0
 #define XESC2_TYPE_LITE 1
 
-// Variant IDs
+// Variant IDs (namespaced per type id; lite variants restart at 0)
 #define XESC2_VARIANT_V1_STD 0
 #define XESC2_VARIANT_V2_STD 1 // v2 Standard (25mΩ shunt, YJG20N06A FETs)
 #define XESC2_VARIANT_V2_PWR 2 // v2 Power (3mΩ shunt, BSC0702LS FETs)
+
+// Lite variants (under XESC2_TYPE_LITE)
+#define XESC2_VARIANT_LITE_STD 0 // Lite Standard (DRV8376, low-side shunts)
 
 #endif /* XESC2_OTP_H_ */
