@@ -136,9 +136,9 @@ void hw_xesc2_reset_drv_faults(void);
 #endif
 
 // ADC current scaling with calibrated factor per variant
-#define GET_CURRENT1()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1] * g_xesc2_variant->get_current_scale)))
-#define GET_CURRENT2()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2] * g_xesc2_variant->get_current_scale)))
-#define GET_CURRENT3()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3] * g_xesc2_variant->get_current_scale)))
+#define GET_CURRENT1()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1])))
+#define GET_CURRENT2()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2])))
+#define GET_CURRENT3()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3])))
 
 
 // Input voltage

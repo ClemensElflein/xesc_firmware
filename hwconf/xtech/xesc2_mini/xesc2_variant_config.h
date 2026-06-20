@@ -52,7 +52,6 @@ typedef struct {
     uint8_t has_phase_shunts; // 1: phase-shunt current sense (mini/power); 0: low-side only (lite)
     float current_amp_gain;
     float current_shunt_res;
-    float get_current_scale;     // ADC scaling for GET_CURRENT* macros
     uint8_t tmc6200_amp_gain;    // TMC6200 x5, x10, x20
     uint8_t tmc6200_drvstrength; // 0=weak, 1=weak+TC, 2=medium, 3=strong
     float lim_current_min;
