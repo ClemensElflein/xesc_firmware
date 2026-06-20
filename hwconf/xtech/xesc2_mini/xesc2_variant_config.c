@@ -373,6 +373,7 @@ void xesc2_terminal_otp_info(int argc, const char **argv) {
     commands_printf(" ");
 
     int found = 0;
+    int active_pair = -1;
     for (int pair = 0; pair < XESC2_OTP_NUM_PAIRS; pair++) {
         const uint8_t *block = otp_read_block(pair);
 
@@ -414,6 +415,7 @@ void xesc2_terminal_otp_info(int argc, const char **argv) {
 
         if (expected_crc == actual_crc) {
             found++;
+            active_pair = pair; // highest valid pair wins (xesc2_get_otp_identity semantics)
         }
     }
 
@@ -423,6 +425,16 @@ void xesc2_terminal_otp_info(int argc, const char **argv) {
                         g_xesc2_otp_identity.type_id, g_xesc2_otp_identity.variant_id,
                         g_xesc2_otp_identity.hw_major, g_xesc2_otp_identity.hw_minor,
                         g_xesc2_otp_identity.hw_patch, g_xesc2_otp_identity.serial);
+
+        const uint8_t *block = otp_read_block(active_pair);
+        char hexbuf[129];
+        for (int i = 0; i < 64; i++) {
+            static const char hx[] = "0123456789abcdef";
+            hexbuf[i * 2]     = hx[block[i] >> 4];
+            hexbuf[i * 2 + 1] = hx[block[i] & 0x0F];
+        }
+        hexbuf[128] = '\0';
+        commands_printf("ACTIVE_RAW: %s", hexbuf);
     } else {
         commands_printf("No valid OTP identity found, using defaults.");
     }
@@ -446,29 +458,29 @@ static int otp_hexval(char c) {
 }
 
 void xesc2_terminal_otp_brand(int argc, const char **argv) {
-    if (argc != 3) {
-        commands_printf("Usage: otp_brand <pair 0..%d> <128 hex chars>",
-                        XESC2_OTP_NUM_PAIRS - 1);
+    if (argc != 2) {
+        commands_printf("Usage: otp_brand <128 hex chars>");
         return;
     }
 
-    // Parse the pair index (decimal).
-    int pair = 0;
-    for (const char *p = argv[1]; *p; p++) {
-        if (*p < '0' || *p > '9') {
-            commands_printf("otp_brand: invalid pair '%s'", argv[1]);
-            return;
+    // Auto-detect the next free pair (first pair with all 0xFF bytes).
+    int pair = -1;
+    for (int i = 0; i < XESC2_OTP_NUM_PAIRS; i++) {
+        const uint8_t *cur = otp_read_block(i);
+        bool empty = true;
+        for (int j = 0; j < 64; j++) {
+            if (cur[j] != 0xFF) { empty = false; break; }
         }
-        pair = pair * 10 + (*p - '0');
+        if (empty) { pair = i; break; }
     }
-    if (argv[1][0] == '\0' || pair < 0 || pair >= XESC2_OTP_NUM_PAIRS) {
-        commands_printf("otp_brand: pair out of range (0..%d)",
-                        XESC2_OTP_NUM_PAIRS - 1);
+    if (pair < 0) {
+        commands_printf("otp_brand: no free pair available (all %d pairs used)",
+                        XESC2_OTP_NUM_PAIRS);
         return;
     }
 
     // Parse 64 bytes from 128 hex chars.
-    const char *hexstr = argv[2];
+    const char *hexstr = argv[1];
     if (strlen(hexstr) != 64 * 2) {
         commands_printf("otp_brand: expected 128 hex chars, got %d",
                         (int)strlen(hexstr));

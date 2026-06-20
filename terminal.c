@@ -1296,8 +1296,8 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 #ifdef HAS_OTP
 		commands_printf("otp_info");
 		commands_printf("  Scan OTP memory and display stored board identities.");
-		commands_printf("otp_brand [pair] [128 hex chars]");
-		commands_printf("  Program a host-signed 64-byte OTP block pair (from the otp_brand tool).");
+		commands_printf("otp_brand [128 hex chars]");
+		commands_printf("  Program a host-signed 64-byte OTP block pair into the next free slot.");
 #endif
 
 		commands_printf("rebootwdt");
