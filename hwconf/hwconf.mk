@@ -12,9 +12,9 @@ HWSRC =	\
 	hwconf/shutdown.c \
 	hwconf/tmc6200.c \
 	hwconf/drv8376.c \
-	hwconf/xtech/xesc2_mini/xesc2_variant_config.c
+	hwconf/xtech/xesc_all_variants/xesc2_variant_config.c
 
 HWINC = hwconf \
 		hwconf/luna \
 		hwconf/other \
-		hwconf/xtech/xesc2_mini
+		hwconf/xtech/xesc_all_variants

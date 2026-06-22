@@ -33,7 +33,7 @@
 #include "xesc2_otp.h"
 #include "commands.h"
 #include "terminal.h"
-#include "hw_xesc2_mini.h"
+#include "hw_xesc_all_variants.h"
 #include "flash_helper.h"
 #include <time.h>
 #include <string.h>
