@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	blst "github.com/supranational/blst/bindings/go"
 )
@@ -22,10 +23,50 @@ var blsDST = []byte("BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
 type blsSignature = blst.P1Affine // signature in G1
 type blsPublicKey = blst.P2Affine // public key in G2
 
-// signBlock produces a 48-byte BLS12-381 compressed G1 signature over dataBlock[0:14].
-func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
+// normalizeSTM32UID lowercases a command-line UID hex string and removes whitespace.
+func normalizeSTM32UID(uidHex string) (string, []byte, error) {
+	var b strings.Builder
+	for _, r := range uidHex {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+
+	normalized := b.String()
+	uid, err := hex.DecodeString(normalized)
+	if err != nil {
+		return "", nil, fmt.Errorf("stm32uid is not valid hex: %w", err)
+	}
+	if len(uid) != 12 {
+		return "", nil, fmt.Errorf("stm32uid must be 12 bytes / 24 hex chars after normalization, got %d bytes", len(uid))
+	}
+	return normalized, uid, nil
+}
+
+func signingMessage(dataBlock, stm32UID []byte) ([]byte, error) {
+	if len(dataBlock) != 32 {
+		return nil, fmt.Errorf("dataBlock must be 32 bytes")
+	}
+	if len(stm32UID) != 12 {
+		return nil, fmt.Errorf("stm32uid must be 12 bytes")
+	}
+
+	msg := make([]byte, 0, 14+len(stm32UID))
+	msg = append(msg, dataBlock[0:14]...)
+	msg = append(msg, stm32UID...)
+	return msg, nil
+}
+
+// signBlock produces a 48-byte BLS12-381 compressed G1 signature over
+// dataBlock[0:14] plus the STM32 UID. The UID is not stored in the OTP payload.
+func signBlock(dataBlock, keyBytes, stm32UID []byte) ([]byte, error) {
 	if len(dataBlock) != 32 || len(keyBytes) != 32 {
 		return nil, fmt.Errorf("dataBlock must be 32 bytes, keyBytes must be 32 bytes")
+	}
+	msg, err := signingMessage(dataBlock, stm32UID)
+	if err != nil {
+		return nil, err
 	}
 
 	sk := new(blst.SecretKey).FromBEndian(keyBytes)
@@ -33,7 +74,7 @@ func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid private key (not a valid scalar)")
 	}
 
-	sig := new(blsSignature).Sign(sk, dataBlock[0:14], blsDST)
+	sig := new(blsSignature).Sign(sk, msg, blsDST)
 	if sig == nil {
 		return nil, fmt.Errorf("signing failed")
 	}
@@ -43,7 +84,7 @@ func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
 	}
 
 	// Self-check: verify the signature we just produced.
-	if valid, err := verifySignatureWithSk(keyBytes, dataBlock, sigCompressed); err != nil || !valid {
+	if valid, err := verifySignatureWithSk(keyBytes, dataBlock, stm32UID, sigCompressed); err != nil || !valid {
 		if err != nil {
 			return nil, fmt.Errorf("BUG: freshly produced signature fails self-verification: %w", err)
 		}
@@ -55,7 +96,7 @@ func signBlock(dataBlock, keyBytes []byte) ([]byte, error) {
 
 // verifySignatureFromFile verifies the BLS signature stored in a 64-byte otp_blocks.bin
 // using a 32-byte private key. Returns (valid, jsonPayload, error).
-func verifySignatureFromFile(binPath, privKeyPath string) (bool, string, error) {
+func verifySignatureFromFile(binPath, privKeyPath, stm32UIDHex string) (bool, string, error) {
 	binData, err := os.ReadFile(binPath)
 	if err != nil {
 		return false, "", fmt.Errorf("reading %s: %w", binPath, err)
@@ -67,6 +108,10 @@ func verifySignatureFromFile(binPath, privKeyPath string) (bool, string, error) 
 	keyBytes, err := loadPrivateKey(privKeyPath)
 	if err != nil {
 		return false, "", fmt.Errorf("loading private key: %w", err)
+	}
+	_, stm32UID, err := normalizeSTM32UID(stm32UIDHex)
+	if err != nil {
+		return false, "", err
 	}
 
 	// Reconstruct signature from blocks:
@@ -83,7 +128,7 @@ func verifySignatureFromFile(binPath, privKeyPath string) (bool, string, error) 
 		dataBlock[i] = 0xFF
 	}
 
-	valid, err := verifySignatureWithSk(keyBytes, dataBlock[:], sig[:])
+	valid, err := verifySignatureWithSk(keyBytes, dataBlock[:], stm32UID, sig[:])
 	if err != nil {
 		return false, "", fmt.Errorf("verification error: %w", err)
 	}
@@ -92,8 +137,8 @@ func verifySignatureFromFile(binPath, privKeyPath string) (bool, string, error) 
 	return valid, info, nil
 }
 
-// verifySignatureWithSk verifies (msg[0:14], sig) against the public key derived from sk.
-func verifySignatureWithSk(skBytes, msg, sig []byte) (bool, error) {
+// verifySignatureWithSk verifies (otp payload + stm32uid, sig) against the public key derived from sk.
+func verifySignatureWithSk(skBytes, msg, stm32UID, sig []byte) (bool, error) {
 	if len(skBytes) != 32 {
 		return false, fmt.Errorf("private key must be 32 bytes")
 	}
@@ -102,6 +147,10 @@ func verifySignatureWithSk(skBytes, msg, sig []byte) (bool, error) {
 	}
 	if len(msg) < 14 {
 		return false, fmt.Errorf("message must be at least 14 bytes")
+	}
+	signMsg, err := signingMessage(msg, stm32UID)
+	if err != nil {
+		return false, err
 	}
 
 	// Derive public key in G2 from private key.
@@ -120,12 +169,12 @@ func verifySignatureWithSk(skBytes, msg, sig []byte) (bool, error) {
 		return false, fmt.Errorf("signature decompression failed")
 	}
 
-	// Core verify: e(sig, g2) == e(H(m), pk), hashing the 14 data bytes.
-	return sigAff.Verify(true, pk, true, msg[0:14], blsDST), nil
+	// Core verify: e(sig, g2) == e(H(m), pk), hashing payload+UID.
+	return sigAff.Verify(true, pk, true, signMsg, blsDST), nil
 }
 
 // verifySignatureFromPubFile verifies using a 96-byte compressed G2 public key file.
-func verifySignatureFromPubFile(binPath, pubKeyPath string) (bool, string, error) {
+func verifySignatureFromPubFile(binPath, pubKeyPath, stm32UIDHex string) (bool, string, error) {
 	binData, err := os.ReadFile(binPath)
 	if err != nil {
 		return false, "", fmt.Errorf("reading %s: %w", binPath, err)
@@ -146,6 +195,10 @@ func verifySignatureFromPubFile(binPath, pubKeyPath string) (bool, string, error
 	if len(pubBytes) != 96 {
 		return false, "", fmt.Errorf("public key must be 96 bytes (compressed G2), got %d", len(pubBytes))
 	}
+	_, stm32UID, err := normalizeSTM32UID(stm32UIDHex)
+	if err != nil {
+		return false, "", err
+	}
 
 	// Reconstruct signature from blocks
 	var sig [48]byte
@@ -158,7 +211,7 @@ func verifySignatureFromPubFile(binPath, pubKeyPath string) (bool, string, error
 		dataBlock[i] = 0xFF
 	}
 
-	valid, err := verifySignatureWithPub(pubBytes, dataBlock[:], sig[:])
+	valid, err := verifySignatureWithPub(pubBytes, dataBlock[:], stm32UID, sig[:])
 	if err != nil {
 		return false, "", fmt.Errorf("verification error: %w", err)
 	}
@@ -167,8 +220,8 @@ func verifySignatureFromPubFile(binPath, pubKeyPath string) (bool, string, error
 	return valid, info, nil
 }
 
-// verifySignatureWithPub verifies (msg[0:14], sig) against a 96-byte compressed G2 public key.
-func verifySignatureWithPub(pkCompressed, msg, sig []byte) (bool, error) {
+// verifySignatureWithPub verifies (otp payload + stm32uid, sig) against a 96-byte compressed G2 public key.
+func verifySignatureWithPub(pkCompressed, msg, stm32UID, sig []byte) (bool, error) {
 	if len(pkCompressed) != 96 {
 		return false, fmt.Errorf("public key must be 96 bytes (compressed G2)")
 	}
@@ -177,6 +230,10 @@ func verifySignatureWithPub(pkCompressed, msg, sig []byte) (bool, error) {
 	}
 	if len(msg) < 14 {
 		return false, fmt.Errorf("message must be at least 14 bytes")
+	}
+	signMsg, err := signingMessage(msg, stm32UID)
+	if err != nil {
+		return false, err
 	}
 
 	// Uncompress public key from G2.
@@ -191,7 +248,7 @@ func verifySignatureWithPub(pkCompressed, msg, sig []byte) (bool, error) {
 		return false, fmt.Errorf("signature decompression failed")
 	}
 
-	return sigAff.Verify(true, pk, true, msg[0:14], blsDST), nil
+	return sigAff.Verify(true, pk, true, signMsg, blsDST), nil
 }
 
 // generateKey creates a new BLS12-381 key pair and saves both private and public keys.

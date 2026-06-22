@@ -3,7 +3,7 @@
 # else (ChibiOS, lispBM, blackmagic, build artifacts) so the context stays tiny.
 **
 !cmd/otp_brand/**
-!hwconf/xtech/xesc2_mini/xesc2_otp.h
+!hwconf/xtech/xesc_all_variants/xesc2_otp.h
 
 # Don't ship the prebuilt host binary; it gets rebuilt in the image.
 cmd/otp_brand/otp_brand

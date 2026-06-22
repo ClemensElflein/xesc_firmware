@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini
+#cgo CFLAGS: -I../../hwconf/xtech/xesc_all_variants
 
 #include "xesc2_otp.h"
 */

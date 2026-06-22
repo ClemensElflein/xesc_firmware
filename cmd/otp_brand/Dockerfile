@@ -28,7 +28,7 @@ RUN go mod download
 # Tool sources + the one firmware header the cgo include (-I../../hwconf/...)
 # resolves to from /src/cmd/otp_brand.
 COPY cmd/otp_brand/ ./
-COPY hwconf/xtech/xesc2_mini/xesc2_otp.h /src/hwconf/xtech/xesc2_mini/xesc2_otp.h
+COPY hwconf/xtech/xesc_all_variants/xesc2_otp.h /src/hwconf/xtech/xesc_all_variants/xesc2_otp.h
 
 # CGO + static link so the binary needs no libc at runtime (scratch-compatible).
 RUN CGO_ENABLED=1 go build \

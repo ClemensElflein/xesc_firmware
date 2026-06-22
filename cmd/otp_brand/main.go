@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I../../hwconf/xtech/xesc2_mini
+#cgo CFLAGS: -I../../hwconf/xtech/xesc_all_variants
 
 #include "xesc2_otp.h"
 */
@@ -27,6 +27,7 @@ func main() {
 		variant   = flag.String("variant", "", "Variation (v1_std, v2_std, v2_pwr)")
 		hw        = flag.String("hw", "", "HW version (e.g. 2.0.1)")
 		keyFile   = flag.String("key", "", "Private key file for signing (32 bytes)")
+		stm32uid  = flag.String("stm32uid", "", "STM32 UID as 24 hex chars; whitespace is removed and letters are lowercased before signing/verifying")
 		output    = flag.String("output", "otp_blocks.bin", "Output binary file")
 		serial    = flag.Int("serial", 0, "Serial number (default: auto-increment)")
 		pair      = flag.Int("pair", 0, "OTP block pair to write (0-7, default 0)")
@@ -61,7 +62,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: --verify-pub requires --key PUBKEY_PATH")
 			os.Exit(1)
 		}
-		valid, info, err := verifySignatureFromPubFile(binPath, pubKeyPath)
+		if *stm32uid == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: --verify-pub requires --stm32uid STM32_UID_HEX")
+			os.Exit(1)
+		}
+		valid, info, err := verifySignatureFromPubFile(binPath, pubKeyPath, *stm32uid)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
@@ -74,7 +79,11 @@ func main() {
 	}
 
 	if *verify != "" {
-		valid, info, err := verifySignatureFromFile(*verify, *keyFile)
+		if *stm32uid == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: --verify requires --stm32uid STM32_UID_HEX")
+			os.Exit(1)
+		}
+		valid, info, err := verifySignatureFromFile(*verify, *keyFile, *stm32uid)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
@@ -94,8 +103,8 @@ func main() {
 		return
 	}
 
-	if *boardType == "" || *variant == "" || *hw == "" || *keyFile == "" {
-		fmt.Fprintln(os.Stderr, "ERROR: --type, --variant, --hw, and --key are required")
+	if *boardType == "" || *variant == "" || *hw == "" || *keyFile == "" || *stm32uid == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: --type, --variant, --hw, --key, and --stm32uid are required")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -125,8 +134,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ERROR: loading key: %v\n", err)
 		os.Exit(1)
 	}
+	normalizedUID, stm32UIDBytes, err := normalizeSTM32UID(*stm32uid)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
 
-	sig, err := signBlock(block, keyBytes)
+	sig, err := signBlock(block, keyBytes, stm32UIDBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
@@ -149,8 +163,8 @@ func main() {
 	// pass --serial explicitly for production runs.
 	if *emitHex {
 		fmt.Fprintf(os.Stderr,
-			"Board: %s  Variant: %s  HW: %s  Serial: %d  Timestamp: %d  CRC16: 0x%04X\n",
-			*boardType, *variant, *hw, serialNum, ts,
+			"Board: %s  Variant: %s  HW: %s  Serial: %d  Timestamp: %d  STM32 UID: %s  CRC16: 0x%04X\n",
+			*boardType, *variant, *hw, serialNum, ts, normalizedUID,
 			binary.LittleEndian.Uint16(block[int(C.XESC2_OTP_OFFS_CRC):]))
 		fmt.Println(hex.EncodeToString(out))
 		return
@@ -162,6 +176,7 @@ func main() {
 	fmt.Printf("HW:         %s\n", *hw)
 	fmt.Printf("Serial:     %d\n", serialNum)
 	fmt.Printf("Timestamp:  %d\n", ts)
+	fmt.Printf("STM32 UID:  %s\n", normalizedUID)
 	fmt.Printf("CRC16:      0x%04X\n", crcVal)
 	fmt.Printf("Signature:  %s... (%d bytes BLS12-381)\n", hex.EncodeToString(sig[:8]), len(sig))
 	fmt.Println()
