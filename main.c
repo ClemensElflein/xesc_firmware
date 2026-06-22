@@ -304,6 +304,7 @@ int main(void) {
 	// still come up below, so the VESC tool can connect and display the fault.
 	if (g_xesc2_fatal_config_error) {
 		mc_interface_set_persistent_fault(FAULT_CODE_FLASH_CORRUPTION_MC_CFG);
+		LED_RED_ON();
 	}
 #endif
 
@@ -348,9 +349,18 @@ int main(void) {
 	chThdCreateStatic(led_thread_wa, sizeof(led_thread_wa), NORMALPRIO, led_thread, NULL);
 	chThdCreateStatic(periodic_thread_wa, sizeof(periodic_thread_wa), NORMALPRIO, periodic_thread, NULL);
 	chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
-
+#ifdef HAS_OTP
+	// Only enable watchdog, if we have actually configured a motor interface.
+	// On fatal error, PWM is never configured, letting the ESC sit idle
+	// in order to configure it using VESC tool.
+	if (!g_xesc2_fatal_config_error) {
+		timeout_init();
+		timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);
+	}
+#else
 	timeout_init();
 	timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);
+#endif
 
 #if HAS_BLACKMAGIC
 	bm_init();
