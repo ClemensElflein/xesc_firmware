@@ -193,7 +193,7 @@ static const xesc2_variant_config_t variant_mini_v2_standard = {
     .driver_type = XESC2_DRIVER_TMC6200,
     .gate_active_high = 1,
     .has_phase_shunts = 1,
-    .current_amp_gain = (5.0f / 0.935f), // 5x gain / 0.935 ADC calibration trim
+    .current_amp_gain = 5.0f, // 5x gain
     .current_shunt_res = 0.025f,
     .tmc6200_amp_gain = 5,        // 5x (10x would saturate at 13.2A)
     .tmc6200_drvstrength = 2,     // medium
@@ -220,7 +220,7 @@ static const xesc2_variant_config_t variant_mini_v2_power = {
     .driver_type = XESC2_DRIVER_TMC6200,
     .gate_active_high = 1,
     .has_phase_shunts = 1,
-    .current_amp_gain = (10.0f / 0.935f), // 10x gain / 0.935 ADC calibration trim
+    .current_amp_gain = 10.0f, // 10x gain
     .current_shunt_res = 0.003f,
     .tmc6200_amp_gain = 10,
     .tmc6200_drvstrength = 3,    // strong for BSC0702LS (1300pF Ciss) at VIO=3.3V
