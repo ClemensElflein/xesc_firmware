@@ -389,6 +389,19 @@ int main(void) {
 
 	mempools_free_appconf(appconf);
 
+#ifdef HAS_OTP
+	// Obvious LED pattern in case of fatal config error
+	if (g_xesc2_fatal_config_error) {
+		for(;;) {
+			chThdSleepMilliseconds(100);
+			LED_RED_OFF();
+			LED_GREEN_ON();
+			chThdSleepMilliseconds(100);
+			LED_RED_ON();
+			LED_GREEN_OFF();
+		}
+	}
+#endif
 	for(;;) {
 		chThdSleepMilliseconds(10);
 	}
