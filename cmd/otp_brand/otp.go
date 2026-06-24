@@ -9,12 +9,18 @@ import "C"
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 )
+
+// STM32F4 Unique Device ID base address (96-bit, 12 bytes)
+// See RM0090 Rev 19 Section 39.1 "Unique device ID register"
+const stm32UIDAddr = 0x1FFF7A10
+const stm32UIDSize = 12
 
 // crc16CCITT computes CRC-16/CCITT-FALSE (poly=0x1021, init=0xFFFF).
 func crc16CCITT(data []byte) uint16 {
@@ -153,6 +159,38 @@ func findProgrammerCLI() (string, error) {
 	}
 
 	return "", fmt.Errorf("STM32_Programmer_CLI not found — install STM32CubeProgrammer or set $ST_PROGRAMMER_PATH")
+}
+
+// ----- STM32 UID read -----
+
+// readSTM32UID reads the 12-byte STM32 unique device ID via st-flash from
+// the fixed system memory address 0x1FFF7A10. Returns the normalized hex string
+// and raw bytes, suitable for direct use in signing/verification.
+func readSTM32UID() (string, []byte, error) {
+	tmpFile := filepath.Join(os.TempDir(), "otp_uid_read.bin")
+	cmd := exec.Command("st-flash", "read", tmpFile, fmt.Sprintf("0x%X", stm32UIDAddr), fmt.Sprintf("%d", stm32UIDSize))
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", nil, fmt.Errorf("cannot read STM32 UID via st-flash: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	uid, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return "", nil, fmt.Errorf("cannot read STM32 UID temp file: %w", err)
+	}
+	if len(uid) != stm32UIDSize {
+		return "", nil, fmt.Errorf("expected %d bytes for STM32 UID, got %d", stm32UIDSize, len(uid))
+	}
+
+	// Normalize via the canonical normalizer (handles whitespace, casing, length validation)
+	normalized, uidBytes, err := normalizeSTM32UID(hex.EncodeToString(uid))
+	if err != nil {
+		return "", nil, fmt.Errorf("read UID normalization failed: %w", err)
+	}
+	_ = uidBytes
+
+	return normalized, uid, nil
 }
 
 // ----- OTP hardware access -----

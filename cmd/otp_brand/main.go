@@ -18,24 +18,25 @@ import (
 
 func main() {
 	var (
-		genKey    = flag.String("generate-key", "", "Generate new private key and save to PATH")
-		dumpPub   = flag.String("dump-pubkey", "", "Print the public key for a private key file")
-		verify    = flag.String("verify", "", "Verify BLS signature in OTP_BLOCKS.BIN using private key KEY")
-		verifyPub = flag.String("verify-pub", "", "Verify BLS signature in OTP_BLOCKS.BIN using public key PUBKEY")
-		read      = flag.Int("read", -1, "Read OTP pair N from device and display decoded info")
-		boardType = flag.String("type", "", "Board type (mini, lite)")
-		variant   = flag.String("variant", "", "Variation (v1_std, v2_std, v2_pwr)")
-		hw        = flag.String("hw", "", "HW version (e.g. 2.0.1)")
-		keyFile   = flag.String("key", "", "Private key file for signing (32 bytes)")
-		stm32uid  = flag.String("stm32uid", "", "STM32 UID as 24 hex chars; whitespace is removed and letters are lowercased before signing/verifying")
-		output    = flag.String("output", "otp_blocks.bin", "Output binary file")
-		serial    = flag.Int("serial", 0, "Serial number (default: auto-increment)")
-		pair      = flag.Int("pair", 0, "OTP block pair to write (0-7, default 0)")
-		force     = flag.Bool("force", false, "Skip OTP occupation check")
-		flash     = flag.Bool("flash", false, "Flash OTP blocks after generation")
-		dryRun    = flag.Bool("dry-run", false, "Show what would be done without writing")
-		dumpC     = flag.Bool("dump-c", false, "Output both blocks as C array for firmware test mode")
-		emitHex   = flag.Bool("emit-hex", false, "Mode 2: print the 64-byte signed block as 128 hex chars on stdout (diagnostics to stderr) for piping into the firmware otp_brand command")
+		genKey       = flag.String("generate-key", "", "Generate new private key and save to PATH")
+		dumpPub      = flag.String("dump-pubkey", "", "Print the public key for a private key file")
+		verify       = flag.String("verify", "", "Verify BLS signature in OTP_BLOCKS.BIN using private key KEY")
+		verifyPub    = flag.String("verify-pub", "", "Verify BLS signature in OTP_BLOCKS.BIN using public key PUBKEY")
+		verifyDevice = flag.Int("verify-device", -1, "Verify BLS signature of OTP pair N directly from device using public key KEY (--key required)")
+		read         = flag.Int("read", -1, "Read OTP pair N from device and display decoded info")
+		boardType    = flag.String("type", "", "Board type (mini, lite)")
+		variant      = flag.String("variant", "", "Variation (v1_std, v2_std, v2_pwr)")
+		hw           = flag.String("hw", "", "HW version (e.g. 2.0.1)")
+		keyFile      = flag.String("key", "", "Private key file for signing (32 bytes)")
+		stm32uid     = flag.String("stm32uid", "", "STM32 UID as 24 hex chars; whitespace is removed and letters are lowercased before signing/verifying")
+		output       = flag.String("output", "otp_blocks.bin", "Output binary file")
+		serial       = flag.Int("serial", 0, "Serial number (default: auto-increment)")
+		pair         = flag.Int("pair", 0, "OTP block pair to write (0-7, default 0)")
+		force        = flag.Bool("force", false, "Skip OTP occupation check")
+		flash        = flag.Bool("flash", false, "Flash OTP blocks after generation")
+		dryRun       = flag.Bool("dry-run", false, "Show what would be done without writing")
+		dumpC        = flag.Bool("dump-c", false, "Output both blocks as C array for firmware test mode")
+		emitHex      = flag.Bool("emit-hex", false, "Mode 2: print the 64-byte signed block as 128 hex chars on stdout (diagnostics to stderr) for piping into the firmware otp_brand command")
 	)
 	flag.Parse()
 
@@ -103,10 +104,58 @@ func main() {
 		return
 	}
 
-	if *boardType == "" || *variant == "" || *hw == "" || *keyFile == "" || *stm32uid == "" {
-		fmt.Fprintln(os.Stderr, "ERROR: --type, --variant, --hw, --key, and --stm32uid are required")
+	if *verifyDevice >= 0 {
+		if *keyFile == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: --verify-device requires --key PUBKEY_PATH")
+			os.Exit(1)
+		}
+		// Auto-read STM32 UID from device if not explicitly provided
+		if *stm32uid == "" {
+			uidHex, _, err := readSTM32UID()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: --stm32uid not provided and cannot auto-read from device.\n")
+				fmt.Fprintf(os.Stderr, "  %v\n", err)
+				fmt.Fprintf(os.Stderr, "  Either pass --stm32uid explicitly or connect the device via ST-Link.\n")
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Auto-read STM32 UID from device: %s\n", uidHex)
+			*stm32uid = uidHex
+		}
+		rawData, err := readOTPPair(*verifyDevice)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		valid, info, err := verifyDeviceOTPPair(rawData, *keyFile, *stm32uid)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("OTP pair %d — Signature verification: %s\n", *verifyDevice,
+			map[bool]string{true: "VALID", false: "INVALID"}[valid])
+		if valid {
+			fmt.Printf("OTP data: %s\n", info)
+		}
+		return
+	}
+
+	if *boardType == "" || *variant == "" || *hw == "" || *keyFile == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: --type, --variant, --hw, and --key are required")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	// Auto-read STM32 UID from device if not explicitly provided
+	if *stm32uid == "" {
+		uidHex, _, err := readSTM32UID()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: --stm32uid not provided and cannot auto-read from device.\n")
+			fmt.Fprintf(os.Stderr, "  %v\n", err)
+			fmt.Fprintf(os.Stderr, "  Either pass --stm32uid explicitly or connect the device via ST-Link.\n")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Auto-read STM32 UID from device: %s\n", uidHex)
+		*stm32uid = uidHex
 	}
 
 	var hwParts MajorMinorPatch

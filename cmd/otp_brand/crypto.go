@@ -220,6 +220,54 @@ func verifySignatureFromPubFile(binPath, pubKeyPath, stm32UIDHex string) (bool, 
 	return valid, info, nil
 }
 
+// verifyDeviceOTPPair verifies the BLS signature from a 64-byte raw OTP pair
+// read from the device against a public key file. Returns (valid, infoJSON, error).
+func verifyDeviceOTPPair(rawData []byte, pubKeyPath, stm32UIDHex string) (bool, string, error) {
+	if len(rawData) != 64 {
+		return false, "", fmt.Errorf("raw OTP data must be 64 bytes, got %d", len(rawData))
+	}
+
+	pubKeyHex, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return false, "", fmt.Errorf("reading public key %s: %w", pubKeyPath, err)
+	}
+	pubKeyHex = []byte(strings.TrimSpace(string(pubKeyHex)))
+	pubBytes, err := hex.DecodeString(string(pubKeyHex))
+	if err != nil {
+		return false, "", fmt.Errorf("public key is not valid hex: %w", err)
+	}
+	if len(pubBytes) != 96 {
+		return false, "", fmt.Errorf("public key must be 96 bytes (compressed G2), got %d", len(pubBytes))
+	}
+
+	_, stm32UID, err := normalizeSTM32UID(stm32UIDHex)
+	if err != nil {
+		return false, "", err
+	}
+
+	// Reconstruct signature from blocks:
+	//   Block 0 bytes 16..31 = sig[0:16]
+	//   Block 1 bytes  0..31 = sig[16:48]
+	var sig [48]byte
+	copy(sig[0:16], rawData[16:32])
+	copy(sig[16:48], rawData[32:64])
+
+	// Data block for hashing: bytes 0..13 (data fields) plus padding 14..31
+	var dataBlock [32]byte
+	copy(dataBlock[:], rawData[0:16])
+	for i := 16; i < 32; i++ {
+		dataBlock[i] = 0xFF
+	}
+
+	valid, err := verifySignatureWithPub(pubBytes, dataBlock[:], stm32UID, sig[:])
+	if err != nil {
+		return false, "", fmt.Errorf("verification error: %w", err)
+	}
+
+	info := formatOTPInfo(dataBlock[:])
+	return valid, info, nil
+}
+
 // verifySignatureWithPub verifies (otp payload + stm32uid, sig) against a 96-byte compressed G2 public key.
 func verifySignatureWithPub(pkCompressed, msg, stm32UID, sig []byte) (bool, error) {
 	if len(pkCompressed) != 96 {
