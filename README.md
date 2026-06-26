@@ -51,43 +51,68 @@ docker build -f cmd/otp_brand/Dockerfile -o out .
 # -> ~/.config/xesc/keys/builder1.key      (private key, 32 bytes)
 # -> ~/.config/xesc/keys/builder1.key.pub  (public key, 96 bytes hex)
 
-# 2. Sign an OTP identity block
+# 2. Sign and flash an OTP identity block (pair 0 by default)
 ./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
-    --key ~/.config/xesc/keys/builder1.key --output otp_blocks.bin
+    --key ~/.config/xesc/keys/builder1.key --flash
 
-# 3. Verify the signature before flashing
+# The STM32 UID is read automatically from the connected device.
+# To specify it explicitly (e.g. for scripting or when auto-read fails):
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key \
+    --stm32uid a1b2c3d4e5f6a7b8c9d0e1f2 --flash
+
+# To write to a different pair (e.g. after a previous branding on pair 0):
+./otp_brand ... --pair 1 --flash
+
+# 3a. Verify signature directly from the device (ST-Link required)
+./otp_brand --verify-device 0 --key ~/.config/xesc/keys/builder1.key.pub
+# -> OTP pair 0 - Signature verification: VALID
+# -> OTP data: {"type":0,"variant":2,"hw":"2.0.1","serial":1,...}
+
+# 3b. Verify signature from a .bin file
 ./otp_brand --verify otp_blocks.bin --key ~/.config/xesc/keys/builder1.key
 # or with public key only:
 ./otp_brand --verify-pub otp_blocks.bin --key ~/.config/xesc/keys/builder1.key.pub
 
-# 4a. Flash OTP via STM32CubeProgrammer (ST-Link required)
-./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
-    --key ~/.config/xesc/keys/builder1.key --flash
+# 3c. Read OTP pair and display decoded fields (no signature check)
+./otp_brand --read 0
 
-# 4b. Flash OTP over USB/CAN comm link (no ST-Link needed)
+# 4. Dry-run: preview what would be written (including auto-read UID)
 ./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
-    --key ~/.config/xesc/keys/builder1.key --emit-hex \
+    --key ~/.config/xesc/keys/builder1.key --dry-run
+
+# 5. Offline: generate signed hex for on-device programming
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key \
+    --stm32uid a1b2c3d4e5f6a7b8c9d0e1f2 --emit-hex \
     | vesc-tool-or-terminal otp_brand 0 <hex>
 ```
 
+If `--stm32uid` is omitted, the tool attempts to read it from the device via ST-Link. This works for all operations that require a connected device (`--flash`, `--read`, `--verify-device`). For offline operations (`--emit-hex`, `--output` only) the UID must be passed explicitly. If auto-read fails (no ST-Link connected), the tool exits with a clear error message.
+
 STM32CubeProgrammer discovery order: `$ST_PROGRAMMER_PATH` → `/usr/local/STMicroelectronics/...` → `/opt/STMicroelectronics/...` → `$PATH`.
 
-| Flag             | Values / Description                                          |
-| ---------------- | ------------------------------------------------------------- |
-| `--type`         | `mini`, `lite`                                                |
-| `--variant`      | `v1_std`, `v2_std`, `v2_pwr`                                  |
-| `--hw`           | `"2.0.1"` (`MAJOR.MINOR.PATCH`)                               |
-| `--key`          | Private key path (32 bytes), or public key for `--verify-pub` |
-| `--output`       | Output `.bin` path (default: `otp_blocks.bin`)                |
-| `--verify`       | Verify signature in a `.bin` using private key `--key`        |
-| `--verify-pub`   | Verify signature in a `.bin` using public key `--key`         |
-| `--generate-key` | Create new key pair at PATH                                   |
-| `--dump-pubkey`  | Print public key for a private key file                       |
-| `--emit-hex`     | Print signed block as hex for on-device programming           |
-| `--dry-run`      | Show what would be done without writing                       |
-| `--dump-c`       | Output C arrays for firmware `test_otp_block[]`               |
-| `--serial`       | Override auto-increment serial number                         |
-| `--force`        | Skip OTP occupation check                                     |
+| Flag               | Values / Description                                            |
+| ------------------ | --------------------------------------------------------------- |
+| `--type`           | `mini`, `lite`                                                  |
+| `--variant`        | `v1_std`, `v2_std`, `v2_pwr`                                    |
+| `--hw`             | `"2.0.1"` (`MAJOR.MINOR.PATCH`)                                 |
+| `--key`            | Private key path (32 bytes), or public key for verification     |
+| `--stm32uid`       | STM32 UID (24 hex chars); auto-read from device if omitted      |
+| `--output`         | Output `.bin` path (default: `otp_blocks.bin`)                  |
+| `--pair`           | OTP block pair to write or read (0–7, default: 0)               |
+| `--flash`          | Flash signed blocks to device after generation                  |
+| `--dry-run`        | Show what would be done without writing anything                |
+| `--emit-hex`       | Print signed block as hex for on-device programming             |
+| `--verify`         | Verify BLS signature in a `.bin` using private key `--key`      |
+| `--verify-pub`     | Verify BLS signature in a `.bin` using public key `--key`       |
+| `--verify-device`  | Verify BLS signature of OTP pair N directly from device         |
+| `--read`           | Read OTP pair N from device and display decoded fields          |
+| `--dump-c`         | Output C arrays for firmware `test_otp_block[]`                 |
+| `--dump-pubkey`    | Print public key for a private key file                         |
+| `--generate-key`   | Create new BLS12-381 key pair at PATH                           |
+| `--serial`         | Override auto-increment serial number                           |
+| `--force`          | Skip OTP occupation check                                       |
 
 #### On-device terminal commands
 

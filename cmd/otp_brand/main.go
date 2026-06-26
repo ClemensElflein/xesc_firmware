@@ -72,10 +72,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Signature verification: %s\n", map[bool]string{true: "VALID", false: "INVALID"}[valid])
-		if valid {
-			fmt.Printf("OTP data: %s\n", info)
-		}
+		printVerificationResult(valid, info)
 		return
 	}
 
@@ -89,10 +86,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Signature verification: %s\n", map[bool]string{true: "VALID", false: "INVALID"}[valid])
-		if valid {
-			fmt.Printf("OTP data: %s\n", info)
-		}
+		printVerificationResult(valid, info)
 		return
 	}
 
@@ -301,4 +295,13 @@ func main() {
 		}
 	}
 	fmt.Println()
+}
+
+// printVerificationResult prints a standardized verification result line and,
+// if valid, the OTP payload info.
+func printVerificationResult(valid bool, info string) {
+	fmt.Printf("Signature verification: %s\n", map[bool]string{true: "VALID", false: "INVALID"}[valid])
+	if valid {
+		fmt.Printf("OTP data: %s\n", info)
+	}
 }

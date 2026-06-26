@@ -9,18 +9,11 @@ import "C"
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 )
-
-// STM32F4 Unique Device ID base address (96-bit, 12 bytes)
-// See RM0090 Rev 19 Section 39.1 "Unique device ID register"
-const stm32UIDAddr = 0x1FFF7A10
-const stm32UIDSize = 12
 
 // crc16CCITT computes CRC-16/CCITT-FALSE (poly=0x1021, init=0xFFFF).
 func crc16CCITT(data []byte) uint16 {
@@ -129,113 +122,6 @@ func writeSerialCounter(n uint16) {
 	os.WriteFile(serialCounterPath(), []byte(fmt.Sprintf("%d\n", n)), 0644)
 }
 
-// ----- STM32CubeProgrammer discovery -----
-
-// findProgrammerCLI locates the STM32_Programmer_CLI binary.
-// Search order: 1) $ST_PROGRAMMER_PATH  2) standard install dirs  3) $PATH
-func findProgrammerCLI() (string, error) {
-	// 1. Explicit env var
-	if p := os.Getenv("ST_PROGRAMMER_PATH"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-
-	// 2. Standard install locations
-	candidates := []string{
-		"/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
-		"/opt/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
-		filepath.Join(os.Getenv("HOME"), "STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
-		}
-	}
-
-	// 3. $PATH
-	if p, err := exec.LookPath("STM32_Programmer_CLI"); err == nil {
-		return p, nil
-	}
-
-	return "", fmt.Errorf("STM32_Programmer_CLI not found — install STM32CubeProgrammer or set $ST_PROGRAMMER_PATH")
-}
-
-// ----- STM32 UID read -----
-
-// readSTM32UID reads the 12-byte STM32 unique device ID via st-flash from
-// the fixed system memory address 0x1FFF7A10. Returns the normalized hex string
-// and raw bytes, suitable for direct use in signing/verification.
-func readSTM32UID() (string, []byte, error) {
-	tmpFile := filepath.Join(os.TempDir(), "otp_uid_read.bin")
-	cmd := exec.Command("st-flash", "read", tmpFile, fmt.Sprintf("0x%X", stm32UIDAddr), fmt.Sprintf("%d", stm32UIDSize))
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", nil, fmt.Errorf("cannot read STM32 UID via st-flash: %w", err)
-	}
-	defer os.Remove(tmpFile)
-
-	uid, err := os.ReadFile(tmpFile)
-	if err != nil {
-		return "", nil, fmt.Errorf("cannot read STM32 UID temp file: %w", err)
-	}
-	if len(uid) != stm32UIDSize {
-		return "", nil, fmt.Errorf("expected %d bytes for STM32 UID, got %d", stm32UIDSize, len(uid))
-	}
-
-	// Normalize via the canonical normalizer (handles whitespace, casing, length validation)
-	normalized, uidBytes, err := normalizeSTM32UID(hex.EncodeToString(uid))
-	if err != nil {
-		return "", nil, fmt.Errorf("read UID normalization failed: %w", err)
-	}
-	_ = uidBytes
-
-	return normalized, uid, nil
-}
-
-// ----- OTP hardware access -----
-
-func pairBaseAddr(pair int) uint32 {
-	return uint32(C.XESC2_OTP_BASE_ADDR) + uint32(pair)*2*uint32(C.XESC2_OTP_BLOCK_SIZE)
-}
-
-// readOTPMagic reads the first byte of an OTP pair via st-flash (absolute address read).
-func readOTPMagic(pair int) (byte, error) {
-	addr := pairBaseAddr(pair)
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("otp_check_%d.bin", pair))
-	cmd := exec.Command("st-flash", "read", tmpFile, fmt.Sprintf("0x%X", addr), "1")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return 0, fmt.Errorf("cannot read OTP via st-flash: %w", err)
-	}
-	defer os.Remove(tmpFile)
-	data, err := os.ReadFile(tmpFile)
-	if err != nil || len(data) < 1 {
-		return 0, fmt.Errorf("cannot read OTP check file")
-	}
-	return data[0], nil
-}
-
-// readOTPPair reads a full 64-byte OTP pair from the device via st-flash.
-func readOTPPair(pair int) ([]byte, error) {
-	addr := pairBaseAddr(pair)
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("otp_read_%d.bin", pair))
-	cmd := exec.Command("st-flash", "read", tmpFile, fmt.Sprintf("0x%X", addr), "64")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("cannot read OTP pair %d via st-flash: %w", pair, err)
-	}
-	defer os.Remove(tmpFile)
-	data, err := os.ReadFile(tmpFile)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read OTP check file: %w", err)
-	}
-	if len(data) != 64 {
-		return nil, fmt.Errorf("expected 64 bytes, got %d", len(data))
-	}
-	return data, nil
-}
-
 // displayOTPPair reads an OTP pair from the device and prints a human-readable summary.
 func displayOTPPair(pair int) error {
 	data, err := readOTPPair(pair)
@@ -299,28 +185,5 @@ func displayOTPPair(pair int) error {
 	fmt.Printf("  Timestamp:   %d (%s)\n", ts, timestampStr)
 	fmt.Printf("  CRC16:       0x%04X (calculated: 0x%04X)\n", expectedCRC, actualCRC)
 	fmt.Printf("  Status:      %s%s\n", validStr, notes)
-	return nil
-}
-
-// flashOTP writes a 64-byte block file to OTP using STM32CubeProgrammer CLI.
-func flashOTP(binPath string, pair int) error {
-	cli, err := findProgrammerCLI()
-	if err != nil {
-		return err
-	}
-
-	addr := pairBaseAddr(pair)
-	fmt.Printf("Flashing OTP pair %d at 0x%X via STM32CubeProgrammer...\n", pair, addr)
-	cmd := exec.Command(cli,
-		"-c", "port=SWD",
-		"-w", binPath,
-		fmt.Sprintf("0x%X", addr),
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("STM32_Programmer_CLI failed: %w", err)
-	}
-	fmt.Println("Done! Remove power and reconnect for OTP to take effect.")
 	return nil
 }
