@@ -102,9 +102,10 @@ func pairBaseAddr(pair int) uint32 {
 }
 
 // readOTPMagic reads the first byte of an OTP pair via st-flash (absolute address read).
+// st-flash enforces 4-byte alignment on reads, so we read 4 bytes and take the first.
 func readOTPMagic(pair int) (byte, error) {
 	addr := pairBaseAddr(pair)
-	data, err := stflashRead(addr, 1, "OTP magic")
+	data, err := stflashRead(addr, 4, "OTP magic")
 	if err != nil {
 		return 0, err
 	}
