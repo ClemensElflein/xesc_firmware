@@ -31,6 +31,11 @@ uint16_t flash_helper_erase_new_app(uint32_t new_app_size);
 uint16_t flash_helper_erase_bootloader(void);
 uint16_t flash_helper_write_new_app_data(uint32_t offset, uint8_t *data, uint32_t len);
 
+// Byte-wise programmer for arbitrary flash/OTP addresses (e.g. the STM32 OTP
+// branding region). Returns 0 on success. Uses the same safe sequence as the
+// internal writers (motor release, kernel lock, slowed watchdog).
+uint16_t flash_helper_write_otp(uint32_t addr, uint8_t *data, uint32_t len);
+
 uint16_t flash_helper_erase_code(int ind);
 uint16_t flash_helper_write_code(int ind, uint32_t offset, uint8_t *data, uint32_t len);
 uint8_t* flash_helper_code_data(int ind);

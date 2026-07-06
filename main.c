@@ -269,6 +269,12 @@ int main(void) {
 	mempools_init();
 	events_init();
 	timer_init(); // Initialize timer here to allow I2C in hw_init
+
+#ifdef HAS_OTP
+	// Detect and apply hardware variant before driver init
+	xesc2_detect_and_apply_variant();
+#endif
+
 	hw_init_gpio();
 	LED_RED_OFF();
 	LED_GREEN_OFF();
@@ -286,6 +292,22 @@ int main(void) {
 	}
 
 	ledpwm_init();
+
+#ifdef HAS_OTP
+	// No valid hardware variant could be detected (e.g. v2 board without valid
+	// OTP, or invalid/corrupt OTP). The variant has fallen back to safe
+	// zero-current limits, but to be certain the motor can never spin with
+	// wrong shunt/phase values (could destroy hardware or injure people), latch
+	// a non-clearing fault BEFORE mc_interface_init(). This makes
+	// mc_interface_init() skip the PWM peripheral setup entirely, so the gate
+	// driver can never be armed, and permanently disables motor control. Comms
+	// still come up below, so the VESC tool can connect and display the fault.
+	if (g_xesc2_fatal_config_error) {
+		mc_interface_set_persistent_fault(FAULT_CODE_FLASH_CORRUPTION_MC_CFG);
+		LED_RED_ON();
+	}
+#endif
+
 	mc_interface_init();
 
 	commands_init();
@@ -327,9 +349,18 @@ int main(void) {
 	chThdCreateStatic(led_thread_wa, sizeof(led_thread_wa), NORMALPRIO, led_thread, NULL);
 	chThdCreateStatic(periodic_thread_wa, sizeof(periodic_thread_wa), NORMALPRIO, periodic_thread, NULL);
 	chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
-
+#ifdef HAS_OTP
+	// Only enable watchdog, if we have actually configured a motor interface.
+	// On fatal error, PWM is never configured, letting the ESC sit idle
+	// in order to configure it using VESC tool.
+	if (!g_xesc2_fatal_config_error) {
+		timeout_init();
+		timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);
+	}
+#else
 	timeout_init();
 	timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);
+#endif
 
 #if HAS_BLACKMAGIC
 	bm_init();
@@ -358,6 +389,19 @@ int main(void) {
 
 	mempools_free_appconf(appconf);
 
+#ifdef HAS_OTP
+	// Obvious LED pattern in case of fatal config error
+	if (g_xesc2_fatal_config_error) {
+		for(;;) {
+			chThdSleepMilliseconds(100);
+			LED_RED_OFF();
+			LED_GREEN_ON();
+			chThdSleepMilliseconds(100);
+			LED_RED_ON();
+			LED_GREEN_OFF();
+		}
+	}
+#endif
 	for(;;) {
 		chThdSleepMilliseconds(10);
 	}

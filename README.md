@@ -1,6 +1,134 @@
-# VESC firmware
+# xESC Firmware (VESC based)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+This is the firmware for the xESC2 family of motor controllers, based on the open-source [VESC firmware](https://github.com/vedderb/bldc) by Benjamin Vedder.
+
+## xESC-specific features
+
+### Hardware variant auto-detection
+
+All xESC2 boards use the **same firmware binary** (`xesc_all_variants`). The firmware reads an OTP (One-Time Programmable) identity record from flash at boot and configures itself for the detected hardware — gate driver, current sensing mode, pin assignments, and motor parameters are all selected at runtime.
+
+| Hardware | How it's detected | Gate driver | Current sensing |
+|---|---|---|---|
+| xESC2 mini v1.x | No OTP + no v2 pin strap | TMC6200 | Phase shunts |
+| xESC2 mini v2.x | OTP identity record | TMC6200 | Phase shunts |
+| xESC2 power v2.x | OTP identity record | TMC6200 | Phase shunts |
+| xESC2 lite | OTP identity record | DRV8376 | Low-side shunts |
+
+**v1.x boards** have no OTP and no pin strap. The firmware detects this combination and loads the v1 hardware configuration automatically — no OTP branding required.
+
+**v2.x boards** carry a pin strap that tells the firmware OTP is required. If OTP is missing or invalid, the firmware will **not** enable the motor and shows a static red LED.
+
+### OTP Branding (xESC2 v2.x series)
+
+v2.x boards ship with a factory-written OTP identity record containing the board type, hardware variant, revision, and the STM32's unique chip ID. The record is cryptographically signed to prevent misconfiguration.
+
+#### Builder Keys
+
+Builder keys are BLS12-381 private keys — generated once per builder and stored securely (e.g. `~/.config/xesc/keys/builder1.key`). Only needed during branding, not for normal operation.
+
+#### Building the Branding Tool
+
+```bash
+cd cmd/otp_brand
+go build -o otp_brand .
+```
+
+Or use Docker for a fully static binary:
+
+```bash
+docker build -f cmd/otp_brand/Dockerfile -o out .
+# binary lands in out/otp_brand
+```
+
+#### Usage
+
+```bash
+# 1. Generate a builder key (once per builder)
+./otp_brand --generate-key ~/.config/xesc/keys/builder1.key
+# -> ~/.config/xesc/keys/builder1.key      (private key, 32 bytes)
+# -> ~/.config/xesc/keys/builder1.key.pub  (public key, 96 bytes hex)
+
+# 2. Sign and flash an OTP identity block (pair 0 by default)
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key --flash
+
+# The STM32 UID is read automatically from the connected device.
+# To specify it explicitly (e.g. for scripting or when auto-read fails):
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key \
+    --stm32uid a1b2c3d4e5f6a7b8c9d0e1f2 --flash
+
+# To write to a different pair (e.g. after a previous branding on pair 0):
+./otp_brand ... --pair 1 --flash
+
+# 3a. Verify signature directly from the device (ST-Link required)
+./otp_brand --verify-device 0 --key ~/.config/xesc/keys/builder1.key.pub
+# -> OTP pair 0 - Signature verification: VALID
+# -> OTP data: {"type":0,"variant":2,"hw":"2.0.1","serial":1,...}
+
+# 3b. Verify signature from a .bin file
+./otp_brand --verify otp_blocks.bin --key ~/.config/xesc/keys/builder1.key
+# or with public key only:
+./otp_brand --verify-pub otp_blocks.bin --key ~/.config/xesc/keys/builder1.key.pub
+
+# 3c. Read OTP pair and display decoded fields (no signature check)
+./otp_brand --read 0
+
+# 4. Dry-run: preview what would be written (including auto-read UID)
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key --dry-run
+
+# 5. Offline: generate signed hex for on-device programming
+./otp_brand --type mini --variant v2_pwr --hw 2.0.1 \
+    --key ~/.config/xesc/keys/builder1.key \
+    --stm32uid a1b2c3d4e5f6a7b8c9d0e1f2 --emit-hex \
+    | vesc-tool-or-terminal otp_brand 0 <hex>
+```
+
+If `--stm32uid` is omitted, the tool attempts to read it from the device via ST-Link. This works for all operations that require a connected device (`--flash`, `--read`, `--verify-device`). For offline operations (`--emit-hex`, `--output` only) the UID must be passed explicitly. If auto-read fails (no ST-Link connected), the tool exits with a clear error message.
+
+STM32CubeProgrammer discovery order: `$ST_PROGRAMMER_PATH` → `/usr/local/STMicroelectronics/...` → `/opt/STMicroelectronics/...` → `$PATH`.
+
+| Flag               | Values / Description                                            |
+| ------------------ | --------------------------------------------------------------- |
+| `--type`           | `mini`, `lite`                                                  |
+| `--variant`        | `v1_std`, `v2_std`, `v2_pwr`                                    |
+| `--hw`             | `"2.0.1"` (`MAJOR.MINOR.PATCH`)                                 |
+| `--key`            | Private key path (32 bytes), or public key for verification     |
+| `--stm32uid`       | STM32 UID (24 hex chars); auto-read from device if omitted      |
+| `--output`         | Output `.bin` path (default: `otp_blocks.bin`)                  |
+| `--pair`           | OTP block pair to write or read (0–7, default: 0)               |
+| `--flash`          | Flash signed blocks to device after generation                  |
+| `--dry-run`        | Show what would be done without writing anything                |
+| `--emit-hex`       | Print signed block as hex for on-device programming             |
+| `--verify`         | Verify BLS signature in a `.bin` using private key `--key`      |
+| `--verify-pub`     | Verify BLS signature in a `.bin` using public key `--key`       |
+| `--verify-device`  | Verify BLS signature of OTP pair N directly from device         |
+| `--read`           | Read OTP pair N from device and display decoded fields          |
+| `--dump-c`         | Output C arrays for firmware `test_otp_block[]`                 |
+| `--dump-pubkey`    | Print public key for a private key file                         |
+| `--generate-key`   | Create new BLS12-381 key pair at PATH                           |
+| `--serial`         | Override auto-increment serial number                           |
+| `--force`          | Skip OTP occupation check                                       |
+
+#### On-device terminal commands
+
+Once firmware is running, two terminal commands are available:
+
+- `otp_info` — dump all OTP pairs with CRC validation and show the active block
+- `otp_brand <pair> <128-hex-chars>` — program a signed block directly (use `--emit-hex` output from the host tool)
+
+---
+
+## VESC Firmware (upstream)
+
+The sections below are from the upstream VESC firmware README. Build instructions, IDE setup, and flashing methods apply to xESC targets as well — use `xesc_all_variants` as the target name instead of the VESC examples shown.
+
+---
+
 [![Travis CI Status](https://travis-ci.com/vedderb/bldc.svg?branch=master)](https://travis-ci.com/vedderb/bldc)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/75e90ffbd46841a3a7be2a9f7a94c242)](https://www.codacy.com/app/vedderb/bldc?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=vedderb/bldc&amp;utm_campaign=Badge_Grade)
 [![Contributors](https://img.shields.io/github/contributors/vedderb/bldc.svg)](https://github.com/vedderb/bldc/graphs/contributors)
@@ -127,7 +255,6 @@ In VESC tool
 ## In case you bricked your VESC
 you will need to upload a new working firmware to the VESC.  
 However, to upload a firmware to a bricked VESC, you have to use a SWD Debugger.
-
 
 ## Contribute
 

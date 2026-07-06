@@ -20,27 +20,50 @@
 #ifndef HW_XESC2_H_
 #define HW_XESC2_H_
 
+#define HAS_OTP
 
-bool tmc_error(void);
-void tmc6200_reset_faults(void);
+#include "xesc2_variant_config.h"
 
-#define HW_NAME					"xESC2"
+// Single firmware for all xESC2 variants. The active gate driver (TMC6200 on
+// mini/power, DRV8376 on lite) and the gate-enable polarity are selected at
+// runtime from the OTP variant config. These helpers dispatch accordingly.
+void hw_xesc2_enable_gate(void);
+void hw_xesc2_disable_gate(void);
+bool hw_xesc2_drv_fault(void);
+void hw_xesc2_reset_drv_faults(void);
+
+#define HW_NAME					(g_xesc2_variant->hw_name)
 
 #define HW_MAJOR				2
 #define HW_MINOR				0
 
-// HW properties
+// HW properties. Both gate drivers are compiled in and dispatched at runtime,
+// so both HW_HAS_* markers are defined (each driver .c self-guards on its own).
+// HW_HAS_PHASE_SHUNTS is the compile-time superset: it pulls in the phase-shunt
+// FOC sampling code so the mini/power variants can use V0_V7 sampling. Whether a
+// given board actually has phase shunts is a RUNTIME property (mini/power do,
+// lite does not), exposed via HW_PHASE_SHUNTS_AVAILABLE() below. Code that lets
+// the user pick phase-shunt-only options must gate on the runtime check, not just
+// the macro, so a lite board cannot be configured into an unsupported mode.
 #define HW_HAS_TMC6200
+#define HW_HAS_DRV8376
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
 
-// Macros
-#define ENABLE_GATE()			palSetPad(GPIOB, 5)
-#define DISABLE_GATE()			palClearPad(GPIOB, 5)
+// Runtime phase-shunt capability (per OTP variant). 1 on mini/power, 0 on lite.
+#define HW_PHASE_SHUNTS_AVAILABLE()		(g_xesc2_variant->has_phase_shunts)
+
+// TMC6200 configuration (runtime from variant; ignored on DRV8376 variants)
+#define TMC6200_CURRENT_AMP_GAIN (g_xesc2_variant->tmc6200_amp_gain)
+#define TMC6200_DRVSTRENGTH (g_xesc2_variant->tmc6200_drvstrength)
+
+// Macros (runtime gate-driver dispatch)
+#define ENABLE_GATE()			hw_xesc2_enable_gate()
+#define DISABLE_GATE()			hw_xesc2_disable_gate()
 
 #define DCCAL_ON()
 #define DCCAL_OFF()
-#define IS_DRV_FAULT()			(tmc_error())
+#define IS_DRV_FAULT()			(hw_xesc2_drv_fault())
 
 
 #define LED_GREEN_ON()			palSetPad(GPIOB, 0)
@@ -106,16 +129,16 @@ void tmc6200_reset_faults(void);
 #define VIN_R2					1500.0
 #endif
 #ifndef CURRENT_AMP_GAIN
-#define CURRENT_AMP_GAIN		(5.0 * 0.595)
+#define CURRENT_AMP_GAIN		(g_xesc2_variant->current_amp_gain)
 #endif
 #ifndef CURRENT_SHUNT_RES
-#define CURRENT_SHUNT_RES		0.033
+#define CURRENT_SHUNT_RES		(g_xesc2_variant->current_shunt_res)
 #endif
 
-// We need to scale the ADC_Value because of the voltage divider between the gate driver and the analog inputs
-#define GET_CURRENT1()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1]*1.11f)))
-#define GET_CURRENT2()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2]*1.11f)))
-#define GET_CURRENT3()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3]*1.11f)))
+// ADC current scaling with calibrated factor per variant
+#define GET_CURRENT1()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR1])))
+#define GET_CURRENT2()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR2])))
+#define GET_CURRENT3()		(int)((4095.0f - ((float)ADC_Value[ADC_IND_CURR3])))
 
 
 // Input voltage
@@ -177,6 +200,10 @@ void tmc6200_reset_faults(void);
 #define HW_I2C_SDA_PORT			GPIOB
 #define HW_I2C_SDA_PIN			11
 
+// V2 identification pin: LOW = v2 board (requires OTP), HIGH/open = v1 board (no OTP needed, but allowed)
+#define HW_V2_ID_GPIO    GPIOD
+#define HW_V2_ID_PIN     2
+
 // Hall/encoder pins
 #define HW_HALL_ENC_GPIO1		GPIOC
 #define HW_HALL_ENC_PIN1		6
@@ -199,8 +226,11 @@ void tmc6200_reset_faults(void);
 // SPI pins
 #define HW_SPI_DEV				SPID1
 #define HW_SPI_GPIO_AF			GPIO_AF_SPI1
-#define HW_SPI_PORT_NSS			GPIOA
-#define HW_SPI_PIN_NSS			4
+// NSS on PC13: avoids GPIOA4 (DRV8376 ILIMIT on lite). PC13 is a VBAT-domain
+// pin (low speed/drive), fine for a slow chip-select. Only used when an SPI
+// encoder / external NRF is configured.
+#define HW_SPI_PORT_NSS			GPIOC
+#define HW_SPI_PIN_NSS			13
 #define HW_SPI_PORT_SCK			GPIOA
 #define HW_SPI_PIN_SCK			5
 #define HW_SPI_PORT_MOSI		GPIOA
@@ -209,6 +239,9 @@ void tmc6200_reset_faults(void);
 #define HW_SPI_PIN_MISO			6
 
 
+// Gate-driver SPI shares the same physical bus pins for both ICs. Only the
+// extra DRV8376 control pins (nSLEEP, ILIMIT) differ; they are configured by
+// drv8376_init() on lite variants.
 #define TMC6200_MOSI_GPIO		GPIOB
 #define TMC6200_MOSI_PIN		4
 #define TMC6200_MISO_GPIO		GPIOB
@@ -218,7 +251,20 @@ void tmc6200_reset_faults(void);
 #define TMC6200_CS_GPIO			GPIOC
 #define TMC6200_CS_PIN			9
 
-#define HW_RESET_DRV_FAULTS()		tmc6200_reset_faults()
+#define DRV8376_MOSI_GPIO		GPIOB
+#define DRV8376_MOSI_PIN		4
+#define DRV8376_MISO_GPIO		GPIOB
+#define DRV8376_MISO_PIN		3
+#define DRV8376_SCK_GPIO		GPIOC
+#define DRV8376_SCK_PIN			10
+#define DRV8376_CS_GPIO			GPIOC
+#define DRV8376_CS_PIN			9
+#define DRV8376_nSLEEP_GPIO		GPIOA
+#define DRV8376_nSLEEP_PIN		15
+#define DRV8376_ILIMIT_GPIO		GPIOA
+#define DRV8376_ILIMIT_PIN		4
+
+#define HW_RESET_DRV_FAULTS()		hw_xesc2_reset_drv_faults()
 
 
 // Measurement macros
@@ -237,29 +283,34 @@ void tmc6200_reset_faults(void);
 #define MCCONF_DEFAULT_MOTOR_TYPE		MOTOR_TYPE_FOC
 #endif
 #ifndef MCCONF_L_MAX_ABS_CURRENT
-#define MCCONF_L_MAX_ABS_CURRENT		15.0	// The maximum absolute current above which a fault is generated
+#define MCCONF_L_MAX_ABS_CURRENT		(g_xesc2_variant->l_max_abs_current)
 #endif
 #ifndef MCCONF_FOC_SAMPLE_V0_V7
 #define MCCONF_FOC_SAMPLE_V0_V7			false	// Run control loop in both v0 and v7 (requires phase shunts)
 #endif
 
-#define MCCONF_L_CURRENT_MAX			6.0	// Current limit in Amperes (Upper)
-#define MCCONF_L_CURRENT_MIN			-6.0	// Current limit in Amperes (Lower)
-#define MCCONF_L_IN_CURRENT_MAX			2.0	// Input current limit in Amperes (Upper)
-#define MCCONF_L_IN_CURRENT_MIN			-2.0	// Input current limit in Amperes (Lower)
+#define MCCONF_L_CURRENT_MAX			(g_xesc2_variant->mcconf_l_current_max)
+#define MCCONF_L_CURRENT_MIN			(g_xesc2_variant->mcconf_l_current_min)
+#define MCCONF_L_IN_CURRENT_MAX			(g_xesc2_variant->mcconf_l_in_current_max)
+#define MCCONF_L_IN_CURRENT_MIN			(g_xesc2_variant->mcconf_l_in_current_min)
+
+// Current-unbalance fault threshold. Per-variant multiplier of FAC_CURRENT (raw
+// ADC unbalance count); overrides the firmware default in hw.h. Lite uses a
+// higher value (noisier low-side sensing) than mini/power.
+#define MCCONF_MAX_CURRENT_UNBALANCE	(FAC_CURRENT * g_xesc2_variant->mcconf_max_current_unbalance)
 
 #define APPCONF_IMU_TYPE					IMU_TYPE_OFF
 
 
-// Setting limits
-#define HW_LIM_CURRENT			-15.0, 15.0
-#define HW_LIM_CURRENT_IN		-10.0, 10.0
-#define HW_LIM_CURRENT_ABS		0.0, 15.0
-#define HW_LIM_VIN				6.0, 57.0
+// Setting limits (runtime from variant)
+#define HW_LIM_CURRENT			(g_xesc2_variant->lim_current_min), (g_xesc2_variant->lim_current_max)
+#define HW_LIM_CURRENT_IN		(g_xesc2_variant->lim_current_in_min), (g_xesc2_variant->lim_current_in_max)
+#define HW_LIM_CURRENT_ABS		0.0, (g_xesc2_variant->lim_current_abs_max)
+#define HW_LIM_VIN				(g_xesc2_variant->lim_vin_min), (g_xesc2_variant->lim_vin_max)
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
 #define HW_LIM_DUTY_MAX			0.0, 0.99
-#define HW_LIM_TEMP_FET			-40.0, 90.0
+#define HW_LIM_TEMP_FET			-40.0, (g_xesc2_variant->lim_temp_fet_max)
 #define HW_MAX_CURRENT_OFFSET 620
 
 

@@ -469,6 +469,11 @@ static uint16_t write_data(uint32_t base, uint8_t *data, uint32_t len) {
 	return FLASH_COMPLETE;
 }
 
+uint16_t flash_helper_write_otp(uint32_t addr, uint8_t *data, uint32_t len) {
+	uint16_t res = write_data(addr, data, len);
+	return (res == FLASH_COMPLETE) ? 0 : res;
+}
+
 static void qmlui_check(int ind) {
 	if (code_checks[ind].check_done) {
 		return;
